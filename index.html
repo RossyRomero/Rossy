@@ -1,1258 +1,574 @@
-import React, { useState, useMemo } from 'react';
-import { 
-  Ship, Anchor, Users, FileText, 
-  TrendingUp, Map, AlertCircle, Plus, Wallet, 
-  CheckCircle, Clock, FileSpreadsheet, Landmark,
-  PieChart as PieChartIcon, X, Info, 
-  UserPlus, Contact, BadgeDollarSign, Receipt,
-  UploadCloud, FileImage, FileDown, Printer, FileScan
-} from 'lucide-react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
-  PieChart, Pie, Cell 
-} from 'recharts';
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Don Sebe ERP - Sistema Operativo Completo</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js para NIIF/Dashboard -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
 
-// --- DATOS INICIALES EXTRAÍDOS DEL EXCEL / PDF ---
-const initialViajes = [
-  { id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, cartera: 12411000, observaciones: 'Madera bajada Satinga (Oscar)' },
-  { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, cartera: 11084000, observaciones: 'Madera Oscar' },
-  { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, cartera: 0, observaciones: 'Flete completo pagado' },
-  { id: 4, fecha: '2025-12-02', viaje: 'Viaje #4', ruta: 'B/tura - Charco', ingreso: 80023500, gastos: 22800000, cartera: 32119500, observaciones: 'Tubos, Grava, Varillas Tola (Alex) y Proyecto Hospital' },
-  { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, cartera: 0, observaciones: 'Viaje Tumaco sin cartera' },
-];
+    <style>
+        /* Animaciones base y utilidades nativas */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
+        .animate-slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        
+        /* Ocultar scrollbars manteniendo funcionalidad */
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="flex flex-col h-screen bg-slate-50 font-sans overflow-hidden text-slate-800">
 
-const initialCarteraViajes = [
-  { id: 1, idViaje: 1, viaje: 'Viaje #1', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 12411000, fecha: '2025-10-25' },
-  { id: 2, idViaje: 2, viaje: 'Viaje #2', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 11084000, fecha: '2025-11-09' },
-  { id: 3, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Tubos / Grava La Tola', valor: 13000000, fecha: '2025-12-02' },
-  { id: 4, idViaje: 4, viaje: 'Viaje #4', cliente: 'Konny Hospital', concepto: 'Proyecto Hospital', valor: 1000000, fecha: '2025-12-02' },
-  { id: 5, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Varillas Tola', valor: 4900000, fecha: '2025-12-02' },
-  { id: 6, idViaje: 4, viaje: 'Viaje #4', cliente: 'Oscar', concepto: 'Madera bajada', valor: 8209500, fecha: '2025-12-02' },
-];
+    <!-- Contenedor Dinámico Principal -->
+    <div id="app-root" class="flex flex-col h-full w-full"></div>
 
-// Base de datos de clientes unificada
-const initialClientesDirectorio = [
-  { id: 1, nombre: 'John Jairo Silva', tipo: 'Equipos e Insumos', telefono: '310 000 0000', ubicacion: 'Buenaventura' },
-  { id: 2, nombre: 'Oscar', tipo: 'Comerciante de Madera', telefono: '312 000 0000', ubicacion: 'Satinga' },
-  { id: 3, nombre: 'Alex', tipo: 'Materiales Construcción', telefono: '315 000 0000', ubicacion: 'La Tola' },
-  { id: 4, nombre: 'Konny Hospital', tipo: 'Institucional / Salud', telefono: '318 000 0000', ubicacion: 'El Charco' },
-  { id: 5, nombre: 'Modesto', tipo: 'Socio / Proveedor', telefono: '320 000 0000', ubicacion: 'Tumaco' },
-];
+<script>
+/**
+ * ==========================================
+ * NÚCLEO DEL SISTEMA (STATE MANAGEMENT)
+ * ==========================================
+ */
 
-const initialCarteraClientes = [
-  { id: 1, cliente: 'John Jairo Silva', conceptoGeneral: 'Equipos e insumos', valorTotal: 41300000, viajesAsociados: 'Histórico', estado: 'Pendiente' },
-  { id: 2, cliente: 'Oscar', conceptoGeneral: 'Madera bajada (Satinga)', valorTotal: 31704500, viajesAsociados: 'Viaje #1, #2, #4', estado: 'Pendiente' },
-  { id: 3, cliente: 'Alex', conceptoGeneral: 'Materiales construcción Tola', valorTotal: 31400000, viajesAsociados: 'Viaje #4 y otros', estado: 'Pendiente' },
-  { id: 4, cliente: 'Konny Hospital', conceptoGeneral: 'Transporte Hospital', valorTotal: 1000000, viajesAsociados: 'Viaje #4', estado: 'Pendiente' },
-];
+const formatCOP = (value) => new Intl.NumberFormat('es-CO', {
+    style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0
+}).format(value || 0);
 
-const initialSocios = [
-  { nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -12211288 },
-  { nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0 },
-  { nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0 },
-  { nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0 },
-  { nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0 },
-  { nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0 },
-];
+const App = {
+    state: {
+        activeTab: 'dashboard',
+        niifTab: 'estado-situacion',
+        docTab: 'escaner',
+        sociedadFiltroMes: 'Todos',
+        carteraViajeFiltro: 'Todos',
+        isUploading: false,
+        uploadSuccess: false,
 
-const initialNomina = [
-  { cargo: 'Capitán', valorDia: 190000, dias: 5 },
-  { cargo: 'Marinero 1', valorDia: 80000, dias: 5 },
-  { cargo: 'Marinero 2', valorDia: 80000, dias: 5 },
-  { cargo: 'Marinero 3', valorDia: 80000, dias: 5 },
-  { cargo: 'Cocinero', valorDia: 80000, dias: 5 },
-  { cargo: 'Maquinista 1', valorDia: 120000, dias: 5 },
-  { cargo: 'Maquinista 2', valorDia: 100000, dias: 5 },
-];
+        selectedViaje: null,
+        selectedCliente: null,
+        isAddViajeOpen: false,
+        isAddClienteOpen: false,
+        isAddNominaOpen: false,
 
-const initialHistorialPagosNomina = [
-  { id: 1, fecha: '2025-10-30', viaje: 'Viaje #1', valor: 3200000, estado: 'Pagado' },
-  { id: 2, fecha: '2025-11-14', viaje: 'Viaje #2', valor: 3200000, estado: 'Pagado' },
-  { id: 3, fecha: '2025-11-24', viaje: 'Viaje #3', valor: 3200000, estado: 'Pagado' },
-  { id: 4, fecha: '2025-12-07', viaje: 'Viaje #4', valor: 3200000, estado: 'Pagado' },
-  { id: 5, fecha: '2025-12-28', viaje: 'Viaje #5', valor: 3200000, estado: 'Pagado' },
-];
+        // Datos (Mock BD)
+        viajes: [
+            { id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, cartera: 12411000, observaciones: 'Madera bajada Satinga (Oscar)' },
+            { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, cartera: 11084000, observaciones: 'Madera Oscar' },
+            { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, cartera: 0, observaciones: 'Flete completo pagado' },
+            { id: 4, fecha: '2025-12-02', viaje: 'Viaje #4', ruta: 'B/tura - Charco', ingreso: 80023500, gastos: 22800000, cartera: 32119500, observaciones: 'Tubos, Grava, Varillas Tola (Alex) y Proyecto Hospital' },
+            { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, cartera: 0, observaciones: 'Viaje Tumaco sin cartera' }
+        ],
+        carteraViajes: [
+            { id: 1, idViaje: 1, viaje: 'Viaje #1', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 12411000, fecha: '2025-10-25' },
+            { id: 2, idViaje: 2, viaje: 'Viaje #2', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 11084000, fecha: '2025-11-09' },
+            { id: 3, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Tubos / Grava La Tola', valor: 13000000, fecha: '2025-12-02' },
+            { id: 4, idViaje: 4, viaje: 'Viaje #4', cliente: 'Konny Hospital', concepto: 'Proyecto Hospital', valor: 1000000, fecha: '2025-12-02' },
+            { id: 5, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Varillas Tola', valor: 4900000, fecha: '2025-12-02' },
+            { id: 6, idViaje: 4, viaje: 'Viaje #4', cliente: 'Oscar', concepto: 'Madera bajada', valor: 8209500, fecha: '2025-12-02' }
+        ],
+        clientesDir: [
+            { id: 1, nombre: 'John Jairo Silva', tipo: 'Equipos e Insumos', telefono: '310 000 0000', ubicacion: 'Buenaventura' },
+            { id: 2, nombre: 'Oscar', tipo: 'Comerciante de Madera', telefono: '312 000 0000', ubicacion: 'Satinga' },
+            { id: 3, nombre: 'Alex', tipo: 'Materiales Construcción', telefono: '315 000 0000', ubicacion: 'La Tola' },
+            { id: 4, nombre: 'Konny Hospital', tipo: 'Institucional / Salud', telefono: '318 000 0000', ubicacion: 'El Charco' },
+            { id: 5, nombre: 'Modesto', tipo: 'Socio / Proveedor', telefono: '320 000 0000', ubicacion: 'Tumaco' }
+        ],
+        carteraClientes: [
+            { id: 1, cliente: 'John Jairo Silva', conceptoGeneral: 'Equipos e insumos', valorTotal: 41300000, viajesAsociados: 'Histórico', estado: 'Pendiente' },
+            { id: 2, cliente: 'Oscar', conceptoGeneral: 'Madera bajada (Satinga)', valorTotal: 31704500, viajesAsociados: 'Viaje #1, #2, #4', estado: 'Pendiente' },
+            { id: 3, cliente: 'Alex', conceptoGeneral: 'Materiales construcción Tola', valorTotal: 31400000, viajesAsociados: 'Viaje #4 y otros', estado: 'Pendiente' },
+            { id: 4, cliente: 'Konny Hospital', conceptoGeneral: 'Transporte Hospital', valorTotal: 1000000, viajesAsociados: 'Viaje #4', estado: 'Pendiente' }
+        ],
+        socios: [
+            { nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -12211288 },
+            { nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0 },
+            { nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0 },
+            { nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0 },
+            { nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0 },
+            { nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0 }
+        ],
+        nomina: [
+            { cargo: 'Capitán', valorDia: 190000, dias: 5 },
+            { cargo: 'Marinero 1', valorDia: 80000, dias: 5 },
+            { cargo: 'Marinero 2', valorDia: 80000, dias: 5 },
+            { cargo: 'Marinero 3', valorDia: 80000, dias: 5 },
+            { cargo: 'Cocinero', valorDia: 80000, dias: 5 },
+            { cargo: 'Maquinista 1', valorDia: 120000, dias: 5 },
+            { cargo: 'Maquinista 2', valorDia: 100000, dias: 5 }
+        ],
+        pagosNomina: [
+            { id: 1, fecha: '2025-10-30', viaje: 'Viaje #1', valor: 3200000, estado: 'Pagado' },
+            { id: 2, fecha: '2025-11-14', viaje: 'Viaje #2', valor: 3200000, estado: 'Pagado' },
+            { id: 3, fecha: '2025-11-24', viaje: 'Viaje #3', valor: 3200000, estado: 'Pagado' },
+            { id: 4, fecha: '2025-12-07', viaje: 'Viaje #4', valor: 3200000, estado: 'Pagado' },
+            { id: 5, fecha: '2025-12-28', viaje: 'Viaje #5', valor: 3200000, estado: 'Pagado' }
+        ],
+    },
 
-// Utilidad para formatear pesos colombianos
-const formatCOP = (value) => {
-  return new Intl.NumberFormat('es-CO', {
-    style: 'currency',
-    currency: 'COP',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0
-  }).format(value || 0);
+    navItems: [
+        { id: 'dashboard', label: 'Inicio', icon: 'trending-up' },
+        { id: 'viajes', label: 'Viajes', icon: 'ship' },
+        { id: 'cartera', label: 'Cartera', icon: 'wallet' },
+        { id: 'documentos', label: 'Archivos', icon: 'file-scan' },
+        { id: 'nomina', label: 'Nómina', icon: 'users' },
+        { id: 'clientes', label: 'Clientes', icon: 'contact' },
+        { id: 'finanzas', label: 'NIIF', icon: 'landmark' },
+        { id: 'sociedad', label: 'Sociedad', icon: 'anchor' }
+    ],
+
+    // Métodos de Mutación (Acciones)
+    setTab: (tab) => { App.state.activeTab = tab; App.render(); },
+    setNiifTab: (tab) => { App.state.niifTab = tab; App.render(); },
+    setDocTab: (tab) => { App.state.docTab = tab; App.render(); },
+    setFilterVal: (key, val) => { App.state[key] = val; App.render(); },
+    
+    openModalViaje: (id) => { App.state.selectedViaje = App.state.viajes.find(v => v.id === id); App.render(); },
+    openModalCliente: (clienteNombre) => { App.state.selectedCliente = App.state.carteraClientes.find(c => c.cliente === clienteNombre); App.render(); },
+    closeModals: () => { 
+        App.state.selectedViaje = null; 
+        App.state.selectedCliente = null; 
+        App.state.isAddViajeOpen = false;
+        App.state.isAddClienteOpen = false;
+        App.state.isAddNominaOpen = false;
+        App.render(); 
+    },
+
+    // Calculadoras
+    getTotales: () => {
+        const s = App.state;
+        const ingresoTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.ingreso), 0);
+        const gastoTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.gastos), 0);
+        const carteraTotal = s.carteraClientes.filter(c => c.estado === 'Pendiente').reduce((acc, curr) => acc + Number(curr.valorTotal), 0);
+        const utilidadNeta = ingresoTotal - gastoTotal;
+        const inversionTotal = s.socios.reduce((acc, curr) => acc + curr.inversion, 0);
+        return { ingresoTotal, gastoTotal, carteraTotal, utilidadNeta, inversionTotal };
+    },
+
+    handleMockUpload: () => {
+        App.state.isUploading = true;
+        App.state.uploadSuccess = false;
+        App.render();
+        setTimeout(() => {
+            App.state.isUploading = false;
+            App.state.uploadSuccess = true;
+            App.render();
+        }, 2000);
+    },
+
+    // Handlers de formularios
+    submitViaje: (e) => {
+        e.preventDefault(); const f = e.target;
+        App.state.viajes.push({
+            id: App.state.viajes.length + 1, viaje: `Viaje #${App.state.viajes.length + 1}`,
+            fecha: f.fecha.value, ruta: f.ruta.value, ingreso: Number(f.ingreso.value), 
+            gastos: Number(f.gastos.value), cartera: Number(f.cartera.value || 0), observaciones: f.observaciones.value
+        });
+        App.closeModals();
+    },
+    submitCliente: (e) => {
+        e.preventDefault(); const f = e.target;
+        App.state.clientesDir.push({
+            id: App.state.clientesDir.length + 1, nombre: f.nombre.value, tipo: f.tipo.value,
+            telefono: f.telefono.value, ubicacion: f.ubicacion.value
+        });
+        App.closeModals();
+    },
+    submitNomina: (e) => {
+        e.preventDefault(); const f = e.target;
+        const totalNominaViaje = App.state.nomina.reduce((acc, curr) => acc + (curr.valorDia * curr.dias), 0);
+        App.state.pagosNomina.unshift({
+            id: App.state.pagosNomina.length + 1, fecha: f.fecha.value, viaje: f.viaje.value, 
+            valor: totalNominaViaje, estado: 'Pagado'
+        });
+        App.closeModals();
+    },
+
+    /**
+     * ==========================================
+     * RENDERIZADORES DE VISTAS (COMPONENTES)
+     * ==========================================
+     */
+    renderDashboard: () => {
+        const t = App.getTotales();
+        const margenOperativo = t.ingresoTotal > 0 ? ((t.utilidadNeta / t.ingresoTotal) * 100).toFixed(1) : 0;
+        const eficienciaRecaudo = t.ingresoTotal > 0 ? (((t.ingresoTotal - t.carteraTotal) / t.ingresoTotal) * 100).toFixed(1) : 0;
+        const roi = t.inversionTotal > 0 ? ((t.utilidadNeta / t.inversionTotal) * 100).toFixed(2) : 0;
+
+        return `
+        <div class="space-y-6 animate-fade-in print:hidden">
+            <div>
+                <h2 class="text-xl md:text-2xl font-bold text-slate-800">Dashboard Operativo</h2>
+                <p class="text-sm text-slate-500">M/N Greicy Jireth - KPIs en Tiempo Real</p>
+            </div>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Ingresos</p><div class="p-1.5 bg-blue-50 rounded-lg text-blue-600"><i data-lucide="trending-up" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.ingresoTotal)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Gastos</p><div class="p-1.5 bg-red-50 rounded-lg text-red-600"><i data-lucide="file-spreadsheet" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.gastoTotal)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Utilidad</p><div class="p-1.5 bg-green-50 rounded-lg text-green-600"><i data-lucide="trending-up" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.utilidadNeta)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Cartera</p><div class="p-1.5 bg-orange-50 rounded-lg text-orange-600"><i data-lucide="alert-circle" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.carteraTotal)}</h3></div>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-80 flex flex-col"><h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center"><i data-lucide="trending-up" class="mr-2 text-blue-600 w-4 h-4"></i> Tendencia Financiera</h3><div class="flex-1 min-h-0 relative"><canvas id="lineChart"></canvas></div></div>
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-80 flex flex-col">
+                    <h3 class="text-sm font-bold text-slate-800 mb-6 flex items-center"><i data-lucide="trending-up" class="mr-2 text-green-500 w-4 h-4"></i> Eficiencia y Rendimiento</h3>
+                    <div class="flex-1 flex flex-col justify-around">
+                        <div><div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Margen Operativo</span><span class="text-sm font-black text-slate-800">${margenOperativo}%</span></div><div class="w-full bg-slate-100 rounded-full h-2.5"><div class="bg-blue-500 h-2.5 rounded-full" style="width: ${Math.min(margenOperativo, 100)}%"></div></div></div>
+                        <div><div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Eficiencia Recaudo</span><span class="text-sm font-black text-slate-800">${eficienciaRecaudo}%</span></div><div class="w-full bg-slate-100 rounded-full h-2.5"><div class="bg-green-500 h-2.5 rounded-full" style="width: ${Math.min(eficienciaRecaudo, 100)}%"></div></div></div>
+                        <div><div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">ROI</span><span class="text-sm font-black text-slate-800">${roi}%</span></div><div class="w-full bg-slate-100 rounded-full h-2.5"><div class="bg-indigo-500 h-2.5 rounded-full" style="width: ${Math.min(roi, 100)}%"></div></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    },
+
+    renderViajes: () => `
+        <div class="space-y-6 animate-fade-in print:hidden">
+            <div class="flex justify-between items-center">
+                <div><h2 class="text-2xl font-bold">Gestión de Viajes</h2><p class="text-sm text-slate-500">Historial operativo</p></div>
+                <button onclick="App.state.isAddViajeOpen=true; App.render()" class="bg-blue-600 text-white px-4 py-2.5 rounded-xl shadow-sm font-bold hover:bg-blue-700 flex items-center"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Nuevo Viaje</button>
+            </div>
+            <div class="grid gap-3">
+                ${[...App.state.viajes].reverse().map(v => `
+                <div onclick="App.openModalViaje(${v.id})" class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center cursor-pointer hover:border-blue-300">
+                    <div class="flex items-center"><div class="bg-slate-100 p-3 rounded-lg mr-4"><i data-lucide="map" class="w-5 h-5"></i></div><div><h4 class="font-bold text-slate-800">${v.viaje} <span class="text-xs text-slate-400 ml-2">${v.fecha}</span></h4><p class="text-sm text-slate-500">${v.ruta}</p></div></div>
+                    <div class="text-right"><p class="text-[10px] uppercase font-bold text-slate-400">Utilidad</p><p class="font-black text-slate-800">${formatCOP(v.ingreso - v.gastos)}</p></div>
+                </div>`).join('')}
+            </div>
+        </div>`,
+
+    renderCartera: () => {
+        const s = App.state;
+        const cv = s.carteraViajeFiltro === 'Todos' ? s.carteraViajes : s.carteraViajes.filter(v => v.viaje === s.carteraViajeFiltro);
+        const totalFiltro = cv.reduce((sum, i) => sum + i.valor, 0);
+
+        return `
+        <div class="space-y-6 animate-fade-in print:hidden">
+            <div class="flex justify-between items-center">
+                <div><h2 class="text-2xl font-bold">Cartera de Clientes</h2><p class="text-sm text-slate-500">Deudas consolidadas</p></div>
+                <div class="bg-orange-100 text-orange-800 px-4 py-2.5 rounded-xl font-black border border-orange-200">Total Exigible: ${formatCOP(App.getTotales().carteraTotal)}</div>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse min-w-[700px]">
+                        <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Cliente</th><th class="p-4">Concepto General</th><th class="p-4">Estado</th><th class="p-4 text-right">Total Adeudado</th></tr></thead>
+                        <tbody>
+                            ${s.carteraClientes.map(c => `
+                            <tr onclick="App.openModalCliente('${c.cliente}')" class="border-b hover:bg-slate-50 cursor-pointer">
+                                <td class="p-4 font-bold text-slate-800">${c.cliente}</td><td class="p-4 text-sm text-slate-600">${c.conceptoGeneral}</td>
+                                <td class="p-4"><span class="text-[10px] font-bold uppercase bg-orange-100 text-orange-700 px-2 py-1 rounded-md">${c.estado}</span></td>
+                                <td class="p-4 text-right font-bold text-orange-600">${formatCOP(c.valorTotal)}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="mt-8">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold flex items-center"><i data-lucide="ship" class="mr-2 text-slate-400 w-5 h-5"></i> Desglose por Viaje</h3>
+                    <select onchange="App.setFilterVal('carteraViajeFiltro', this.value)" class="border rounded-lg p-2 text-sm bg-white">
+                        <option value="Todos" ${s.carteraViajeFiltro === 'Todos'?'selected':''}>Ver Todos</option>
+                        ${s.viajes.map(v => `<option value="${v.viaje}" ${s.carteraViajeFiltro === v.viaje?'selected':''}>${v.viaje}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                    <table class="w-full text-left border-collapse min-w-[600px]">
+                        <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Viaje</th><th class="p-4">Cliente</th><th class="p-4">Concepto</th><th class="p-4 text-right">Monto</th></tr></thead>
+                        <tbody>
+                            ${cv.length ? cv.map(c => `
+                            <tr class="border-b hover:bg-slate-50"><td class="p-4 text-sm font-bold">${c.viaje}</td><td class="p-4 text-sm">${c.cliente}</td><td class="p-4 text-sm text-slate-500">${c.concepto}</td><td class="p-4 text-right font-bold text-orange-600">${formatCOP(c.valor)}</td></tr>`).join('') 
+                            : '<tr><td colspan="4" class="p-8 text-center text-slate-500">No hay deudas.</td></tr>'}
+                            ${cv.length ? `<tr class="bg-orange-50"><td colspan="3" class="p-4 text-right font-bold text-orange-900 text-sm uppercase">Total:</td><td class="p-4 text-right font-black text-orange-700 text-lg">${formatCOP(totalFiltro)}</td></tr>` : ''}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>`;
+    },
+
+    renderDocumentos: () => {
+        const s = App.state;
+        let content = '';
+
+        if(s.docTab === 'escaner') {
+            content = `
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-10 text-center print:hidden">
+                    <h3 class="font-bold text-xl mb-2">Carga Inteligente de Documentos</h3>
+                    <p class="text-sm text-slate-500 mb-8">Sube archivos PDF o fotos de facturas para extraer datos.</p>
+                    <div class="border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-2xl p-10 flex flex-col items-center cursor-pointer hover:bg-blue-50">
+                        <i data-lucide="file-image" class="text-blue-400 w-12 h-12 mb-4"></i>
+                        <p class="font-bold text-lg">Arrastra tu PDF o Imagen aquí</p>
+                        <button onclick="App.handleMockUpload()" ${s.isUploading ? 'disabled':''} class="mt-4 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold disabled:bg-slate-400">
+                            ${s.isUploading ? 'Procesando...' : 'Seleccionar Archivo'}
+                        </button>
+                    </div>
+                    ${s.uploadSuccess ? `
+                    <div class="mt-8 bg-green-50 border border-green-200 p-6 rounded-xl text-left animate-slide-up">
+                        <div class="flex items-center text-green-700 font-bold text-lg mb-4"><i data-lucide="check-circle" class="mr-2"></i> Documento Analizado Exitosamente</div>
+                        <div class="bg-white rounded-lg p-4 border border-green-100 grid grid-cols-2 gap-4 text-sm">
+                            <div><span class="font-bold text-slate-500 block">Concepto</span>Combustible (Acpm)</div>
+                            <div><span class="font-bold text-slate-500 block">Fecha</span>15/12/2025</div>
+                            <div><span class="font-bold text-slate-500 block">Proveedor</span>EDS XYZ</div>
+                            <div><span class="font-bold text-slate-500 block">Valor Extraído</span><span class="text-lg font-black">$ 3,450,000</span></div>
+                        </div>
+                    </div>` : ''}
+                </div>`;
+        } else if (s.docTab === 'formato-ingresos' || s.docTab === 'formato-gastos') {
+            const title = s.docTab === 'formato-ingresos' ? 'INGRESOS Y FLETES' : 'GASTOS OPERATIVOS';
+            const th2 = s.docTab === 'formato-ingresos' ? 'Cliente / Remitente' : 'Proveedor / Pagado A';
+            const th3 = s.docTab === 'formato-ingresos' ? 'Concepto / Carga' : 'Concepto del Gasto';
+            const th5 = s.docTab === 'formato-ingresos' ? 'Estado (P/D)' : 'Firma Recibido';
+            content = `
+                <div class="bg-white border p-8 shadow-sm">
+                    <div class="text-center mb-6 border-b-2 border-slate-800 pb-4">
+                        <h1 class="text-2xl font-black uppercase">Transporte Marítimo Don Sebe</h1><h2 class="text-lg font-bold">M/N Greicy Jireth</h2><h3 class="text-base font-semibold mt-2">REPORTE MANUAL DE ${title}</h3>
+                    </div>
+                    <div class="flex justify-between text-sm font-bold mb-4"><div>Viaje N°: _________</div><div>Fecha: _________</div><div>Firma: _________</div></div>
+                    <table class="w-full text-left border-collapse border border-slate-800 text-sm">
+                        <thead><tr class="bg-slate-100"><th class="border border-slate-800 p-2">Fecha</th><th class="border border-slate-800 p-2">${th2}</th><th class="border border-slate-800 p-2">${th3}</th><th class="border border-slate-800 p-2 text-right">Valor ($)</th><th class="border border-slate-800 p-2 text-center">${th5}</th></tr></thead>
+                        <tbody>${Array(15).fill('<tr><td class="border border-slate-800 p-4"></td><td class="border border-slate-800 p-4"></td><td class="border border-slate-800 p-4"></td><td class="border border-slate-800 p-4"></td><td class="border border-slate-800 p-4"></td></tr>').join('')}</tbody>
+                    </table>
+                </div>`;
+        }
+
+        return `
+        <div class="space-y-6 animate-fade-in">
+            <div class="flex justify-between items-center print:hidden">
+                <div><h2 class="text-2xl font-bold">Centro de Documentos</h2></div>
+                <button onclick="window.print()" class="bg-slate-900 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center"><i data-lucide="printer" class="w-4 h-4 mr-2"></i> Imprimir</button>
+            </div>
+            <div class="flex space-x-2 overflow-x-auto pb-2 print:hidden">
+                ${[{id:'escaner', label:'Escanear', icon:'upload-cloud'},{id:'formato-ingresos', label:'Formato Ingresos', icon:'file-text'},{id:'formato-gastos', label:'Formato Gastos', icon:'file-text'}].map(t => `
+                    <button onclick="App.setDocTab('${t.id}')" class="flex items-center px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap border ${s.docTab===t.id ? 'bg-blue-600 text-white' : 'bg-white hover:bg-slate-50'}"><i data-lucide="${t.icon}" class="w-4 h-4 mr-2"></i> ${t.label}</button>
+                `).join('')}
+            </div>
+            ${content}
+        </div>`;
+    },
+
+    renderClientes: () => {
+        const s = App.state;
+        return `
+        <div class="space-y-6 animate-fade-in print:hidden">
+            <div class="flex justify-between items-center">
+                <div><h2 class="text-2xl font-bold">Directorio de Clientes</h2></div>
+                <button onclick="App.state.isAddClienteOpen=true; App.render()" class="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center"><i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Cliente</button>
+            </div>
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <table class="w-full text-left border-collapse min-w-[800px]">
+                    <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Cliente</th><th class="p-4">Actividad</th><th class="p-4">Teléfono</th><th class="p-4">Ubicación</th><th class="p-4 text-right">Estado Cartera</th></tr></thead>
+                    <tbody>
+                        ${s.clientesDir.map(c => {
+                            const deuda = s.carteraClientes.find(car => car.cliente.includes(c.nombre));
+                            const tieneDeuda = deuda && deuda.estado === 'Pendiente';
+                            return `
+                            <tr class="border-b hover:bg-slate-50 cursor-pointer" onclick="${tieneDeuda ? `App.openModalCliente('${deuda.cliente}')` : ''}">
+                                <td class="p-4 flex items-center"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mr-3">${c.nombre.charAt(0)}</div><span class="font-bold">${c.nombre}</span></td>
+                                <td class="p-4 text-sm text-slate-600"><span class="bg-slate-100 px-2 py-1 rounded-md text-xs">${c.tipo}</span></td>
+                                <td class="p-4 text-sm">${c.telefono}</td><td class="p-4 text-sm">${c.ubicacion}</td>
+                                <td class="p-4 text-right"><div class="inline-block px-3 py-1 rounded-lg text-xs font-bold ${tieneDeuda ? 'bg-orange-50 text-orange-700 border-orange-100 border' : 'bg-green-50 text-green-700 border-green-100 border'}">${tieneDeuda ? formatCOP(deuda.valorTotal) : 'A Paz y Salvo'}</div></td>
+                            </tr>`
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    },
+
+    renderNomina: () => {
+        const s = App.state;
+        const totalDiaria = s.nomina.reduce((acc, curr) => acc + curr.valorDia, 0);
+        const totalViaje = s.nomina.reduce((acc, curr) => acc + (curr.valorDia * curr.dias), 0);
+
+        return `
+        <div class="space-y-6 animate-fade-in print:hidden">
+            <div class="flex justify-between items-center">
+                <div><h2 class="text-2xl font-bold">Gestión de Nómina</h2></div>
+                <button onclick="App.state.isAddNominaOpen=true; App.render()" class="bg-slate-900 text-white px-4 py-2.5 rounded-xl font-bold flex items-center"><i data-lucide="badge-dollar-sign" class="w-4 h-4 mr-2"></i> Liquidar Nómina</button>
+            </div>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                    <div class="p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center"><i data-lucide="users" class="mr-2 text-slate-500 w-5 h-5"></i> Tarifas de Tripulación</h3></div>
+                    <table class="w-full text-left border-collapse">
+                        <thead><tr class="text-slate-500 text-xs uppercase border-b"><th class="p-4">Cargo</th><th class="p-4 text-right">Tarifa Día</th><th class="p-4 text-right">Ref. Viaje (5D)</th></tr></thead>
+                        <tbody>
+                            ${s.nomina.map(n => `<tr class="border-b text-sm"><td class="p-4 font-bold">${n.cargo}</td><td class="p-4 text-right text-slate-600">${formatCOP(n.valorDia)}</td><td class="p-4 text-right font-bold">${formatCOP(n.valorDia * n.dias)}</td></tr>`).join('')}
+                            <tr class="bg-blue-50/50"><td class="p-4 font-bold text-blue-900 text-sm">TOTAL NÓMINA</td><td class="p-4 font-bold text-right text-blue-700">${formatCOP(totalDiaria)} / Día</td><td class="p-4 font-black text-right text-blue-800">${formatCOP(totalViaje)}</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+                    <div class="p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center"><i data-lucide="receipt" class="mr-2 text-slate-500 w-5 h-5"></i> Historial de Liquidaciones</h3></div>
+                    <div class="p-5 space-y-3 overflow-y-auto max-h-[400px]">
+                        ${s.pagosNomina.map(p => `
+                            <div class="flex justify-between items-center p-4 border rounded-xl">
+                                <div class="flex items-center"><div class="bg-green-100 p-2 rounded-lg text-green-600 mr-4"><i data-lucide="check-circle" class="w-5 h-5"></i></div><div><p class="font-bold">${p.viaje}</p><p class="text-xs text-slate-500">Aprobado el ${p.fecha}</p></div></div>
+                                <div class="text-right"><p class="font-black">${formatCOP(p.valor)}</p><p class="text-[10px] font-bold text-green-600 uppercase mt-1">${p.estado}</p></div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    },
+
+    renderNIIF: () => {
+        const t = App.getTotales(); const s = App.state;
+        let content = '';
+        if(s.niifTab === 'estado-situacion') {
+            content = `<div class="grid md:grid-cols-2 gap-8">
+                <div><h4 class="font-black mb-3 bg-slate-50 p-2 rounded">ACTIVOS</h4><div class="flex justify-between text-sm py-1"><span>Efectivo (Caja)</span><span>${formatCOP(t.utilidadNeta - t.carteraTotal)}</span></div><div class="flex justify-between text-sm py-1"><span>Cuentas por Cobrar</span><span>${formatCOP(t.carteraTotal)}</span></div><div class="flex justify-between font-bold pt-2 border-t"><span>TOTAL ACTIVOS</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
+                <div><h4 class="font-black mb-3 bg-slate-50 p-2 rounded">PASIVOS Y PATRIMONIO</h4><div class="flex justify-between text-sm py-1"><span>Pasivos (CxP Mantenimiento)</span><span>${formatCOP(12211288)}</span></div><div class="flex justify-between text-sm py-1"><span>Capital Social</span><span>${formatCOP(t.inversionTotal)}</span></div><div class="flex justify-between text-sm py-1"><span>Utilidades Retenidas</span><span>${formatCOP(t.utilidadNeta - 12211288)}</span></div><div class="flex justify-between font-black text-blue-700 pt-2 border-t"><span>TOTAL PAS. + PAT.</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
+            </div>`;
+        } else if (s.niifTab === 'resultados') {
+            content = `<div class="space-y-3 text-sm max-w-2xl mx-auto">
+                <div class="flex justify-between font-bold bg-slate-50 p-2 rounded"><span>Ingresos Ordinarios</span><span>${formatCOP(t.ingresoTotal)}</span></div><div class="flex justify-between px-2"><span>(-) Costos de Operación</span><span class="text-red-500">-${formatCOP(t.gastoTotal * 0.7)}</span></div><div class="flex justify-between px-2"><span>(-) Costos Laborales</span><span class="text-red-500">-${formatCOP(t.gastoTotal * 0.3)}</span></div><div class="flex justify-between font-black text-xl text-green-600 pt-4 border-t border-green-200 mt-2"><span>UTILIDAD NETA</span><span>${formatCOP(t.utilidadNeta)}</span></div>
+            </div>`;
+        }
+
+        return `<div class="space-y-6 animate-fade-in"><h2 class="text-2xl font-black flex items-center"><i data-lucide="landmark" class="mr-2 text-blue-600 w-6 h-6"></i> Módulo Financiero NIIF</h2><div class="flex space-x-2 overflow-x-auto hide-scroll pb-2">${['estado-situacion', 'resultados'].map(tab => `<button onclick="App.setNiifTab('${tab}')" class="px-4 py-2 rounded-lg text-sm font-bold border ${s.niifTab === tab ? 'bg-slate-800 text-white' : 'bg-white hover:bg-slate-50'}">${tab.replace('-', ' ').toUpperCase()}</button>`).join('')}</div><div class="bg-white rounded-2xl shadow-sm border p-6 min-h-[300px]">${content}</div></div>`;
+    },
+
+    renderSociedad: () => {
+        const s = App.state;
+        const meses = [...new Set(s.viajes.map(v => v.fecha.substring(0, 7)))].sort();
+        const vFiltro = s.sociedadFiltroMes === 'Todos' ? s.viajes : s.viajes.filter(v => v.fecha.startsWith(s.sociedadFiltroMes));
+        const utilidadPeriodo = vFiltro.reduce((acc, v) => acc + (v.ingreso - v.gastos), 0);
+
+        return `
+        <div class="space-y-6 animate-fade-in print:hidden">
+            <div class="flex justify-between items-center">
+                <div><h2 class="text-2xl font-bold">Participación Societaria</h2></div>
+                <div class="flex items-center space-x-2"><span class="text-sm font-bold">Periodo:</span>
+                    <select onchange="App.setFilterVal('sociedadFiltroMes', this.value)" class="border rounded-lg p-2 text-sm bg-white"><option value="Todos" ${s.sociedadFiltroMes==='Todos'?'selected':''}>Histórico Total</option>${meses.map(m => `<option value="${m}" ${s.sociedadFiltroMes===m?'selected':''}>Mes: ${m}</option>`).join('')}</select>
+                </div>
+            </div>
+            <div class="bg-blue-50 border border-blue-100 p-4 rounded-xl flex justify-between items-center shadow-sm"><span class="text-blue-800 font-bold text-sm">Utilidad generada (${s.sociedadFiltroMes}):</span><span class="text-blue-700 font-black text-2xl">${formatCOP(utilidadPeriodo)}</span></div>
+            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                <table class="w-full text-left border-collapse min-w-[800px]">
+                    <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Socio</th><th class="p-4 text-center">% Part.</th><th class="p-4 text-right">Inversión Base</th><th class="p-4 text-right">Utilidad Bruta</th><th class="p-4 text-right">Deuda Mantenimiento</th><th class="p-4 text-right bg-green-50/50">Líquido a Recibir</th></tr></thead>
+                    <tbody>
+                        ${s.socios.map(socio => {
+                            const utilBruta = utilidadPeriodo * (socio.porcentaje / 100);
+                            let liquido = utilBruta;
+                            if (socio.saldoMantenimiento < 0) {
+                                const deudaAbs = Math.abs(socio.saldoMantenimiento);
+                                liquido = utilBruta >= deudaAbs ? utilBruta - deudaAbs : 0;
+                            }
+                            return `
+                            <tr class="border-b hover:bg-slate-50">
+                                <td class="p-4 flex items-center"><div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-bold mr-3">${socio.nombre.charAt(0)}</div><span class="font-bold">${socio.nombre}</span></td>
+                                <td class="p-4 text-center font-black text-blue-600">${socio.porcentaje}%</td><td class="p-4 text-right text-sm text-slate-600">${formatCOP(socio.inversion)}</td>
+                                <td class="p-4 text-right font-bold">${formatCOP(utilBruta)}</td><td class="p-4 text-right text-xs"><span class="${socio.saldoMantenimiento < 0 ? 'text-red-500 font-bold bg-red-50 px-2 py-1 rounded' : 'text-slate-400'}">${socio.saldoMantenimiento < 0 ? formatCOP(socio.saldoMantenimiento) : 'Sin deuda'}</span></td>
+                                <td class="p-4 text-right bg-green-50/30 font-black text-lg ${liquido > 0 ? 'text-green-600' : 'text-slate-400'}">${formatCOP(liquido)}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    },
+
+    renderModals: () => {
+        let h = ''; const s = App.state;
+
+        // Modal Form Viaje
+        if (s.isAddViajeOpen) h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50"><div class="bg-white w-full max-w-md rounded-2xl p-6 animate-slide-up"><div class="flex justify-between mb-4"><h3 class="font-bold text-xl">Registrar Viaje</h3><button onclick="App.closeModals()"><i data-lucide="x"></i></button></div><form onsubmit="App.submitViaje(event)" class="space-y-3"><input name="fecha" type="date" required class="w-full border p-2 rounded-lg text-sm"/><input name="ruta" type="text" placeholder="Ruta" required class="w-full border p-2 rounded-lg text-sm"/><input name="ingreso" type="number" placeholder="Ingreso Bruto" required class="w-full border p-2 rounded-lg text-sm"/><input name="gastos" type="number" placeholder="Gastos Operativos" required class="w-full border p-2 rounded-lg text-sm"/><input name="cartera" type="number" placeholder="Monto a Cartera" class="w-full border p-2 rounded-lg text-sm"/><textarea name="observaciones" placeholder="Observaciones" class="w-full border p-2 rounded-lg text-sm"></textarea><button type="submit" class="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800">Guardar</button></form></div></div>`;
+        
+        // Modal Form Cliente
+        if (s.isAddClienteOpen) h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50"><div class="bg-white w-full max-w-md rounded-2xl p-6 animate-slide-up"><div class="flex justify-between mb-4"><h3 class="font-bold text-xl">Registrar Cliente</h3><button onclick="App.closeModals()"><i data-lucide="x"></i></button></div><form onsubmit="App.submitCliente(event)" class="space-y-3"><input name="nombre" type="text" placeholder="Nombre Comercial / Contacto" required class="w-full border p-2 rounded-lg text-sm"/><input name="telefono" type="text" placeholder="Teléfono" required class="w-full border p-2 rounded-lg text-sm"/><input name="ubicacion" type="text" placeholder="Ubicación" required class="w-full border p-2 rounded-lg text-sm"/><select name="tipo" class="w-full border p-2 rounded-lg text-sm"><option>Comerciante de Madera</option><option>Materiales Construcción</option><option>Equipos e Insumos</option><option>General</option></select><button type="submit" class="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800">Guardar Cliente</button></form></div></div>`;
+        
+        // Modal Form Nómina
+        if (s.isAddNominaOpen) {
+            const tN = formatCOP(s.nomina.reduce((a, c) => a + (c.valorDia * c.dias), 0));
+            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50"><div class="bg-white w-full max-w-sm rounded-2xl p-6 animate-slide-up"><div class="flex justify-between mb-4"><h3 class="font-bold text-xl">Liquidar Viaje</h3><button onclick="App.closeModals()"><i data-lucide="x"></i></button></div><form onsubmit="App.submitNomina(event)" class="space-y-3"><input name="fecha" type="date" required class="w-full border p-2 rounded-lg text-sm"/><select name="viaje" required class="w-full border p-2 rounded-lg text-sm bg-white"><option value="">Seleccione Viaje</option>${s.viajes.map(v => `<option value="${v.viaje}">${v.viaje}</option>`).join('')}</select><div class="bg-blue-50 p-4 rounded-xl text-center mt-4"><p class="text-xs font-bold text-blue-800 uppercase">Total a Liquidar</p><p class="text-2xl font-black text-blue-600">${tN}</p></div><button type="submit" class="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800">Confirmar</button></form></div></div>`;
+        }
+
+        // Modal Detalle Viaje
+        if (s.selectedViaje) {
+            const v = s.selectedViaje;
+            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50" onclick="App.closeModals()"><div class="bg-white w-full max-w-sm rounded-2xl overflow-hidden animate-slide-up" onclick="event.stopPropagation()"><div class="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 class="font-bold">${v.viaje}</h3><button onclick="App.closeModals()"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-5 space-y-4"><div class="flex justify-between"><span class="text-sm text-slate-500">Ruta</span><span class="font-bold">${v.ruta}</span></div><div class="grid grid-cols-2 gap-3"><div class="bg-green-50 p-3 rounded-lg"><p class="text-xs text-green-700 font-bold">Ingresos</p><p class="font-black">${formatCOP(v.ingreso)}</p></div><div class="bg-red-50 p-3 rounded-lg"><p class="text-xs text-red-700 font-bold">Gastos</p><p class="font-black">${formatCOP(v.gastos)}</p></div></div><div class="bg-slate-50 p-3 rounded-lg flex justify-between"><span class="font-bold">Utilidad</span><span class="font-black text-blue-600">${formatCOP(v.ingreso - v.gastos)}</span></div></div></div></div>`;
+        }
+
+        // Modal Detalle Cliente (Cartera)
+        if (s.selectedCliente) {
+            const c = s.selectedCliente;
+            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50" onclick="App.closeModals()"><div class="bg-white w-full max-w-md rounded-2xl overflow-hidden animate-slide-up" onclick="event.stopPropagation()"><div class="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 class="font-bold text-lg"><i data-lucide="users" class="w-5 h-5 inline mr-1 text-blue-600"></i> ${c.cliente}</h3><button onclick="App.closeModals()"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-5"><div class="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center mb-4"><p class="text-sm text-orange-800 font-bold mb-1">Deuda Total Consolidada</p><p class="text-3xl font-black text-orange-600">${formatCOP(c.valorTotal)}</p></div><button class="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800">Registrar Abono a ${c.cliente}</button></div></div></div>`;
+        }
+
+        return h;
+    },
+
+    // Orquestador de Renderizado
+    render: () => {
+        const root = document.getElementById('app-root');
+        
+        let mainContent = '';
+        switch(App.state.activeTab) {
+            case 'dashboard': mainContent = App.renderDashboard(); break;
+            case 'viajes': mainContent = App.renderViajes(); break;
+            case 'cartera': mainContent = App.renderCartera(); break;
+            case 'documentos': mainContent = App.renderDocumentos(); break;
+            case 'nomina': mainContent = App.renderNomina(); break;
+            case 'clientes': mainContent = App.renderClientes(); break;
+            case 'finanzas': mainContent = App.renderNIIF(); break;
+            case 'sociedad': mainContent = App.renderSociedad(); break;
+        }
+
+        // Estructura Base Global
+        root.innerHTML = `
+            ${App.renderModals()}
+            <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden">
+                <h1 class="text-xl font-black text-slate-800 flex items-center"><i data-lucide="anchor" class="mr-2 text-blue-600 w-6 h-6"></i> Don Sebe ERP</h1>
+                <div class="bg-slate-900 text-white px-3 py-1 rounded-full text-xs font-bold shadow">Modo Admin</div>
+            </header>
+            
+            <main class="flex-1 overflow-y-auto p-4 md:p-6 pb-20 bg-slate-50 print:bg-white print:p-0">
+                <div class="max-w-6xl mx-auto">${mainContent}</div>
+            </main>
+
+            <nav class="bg-white border-t border-slate-200 shrink-0 pb-safe fixed bottom-0 w-full z-40 print:hidden">
+                <div class="max-w-6xl mx-auto flex justify-between overflow-x-auto hide-scroll">
+                    ${App.navItems.map(item => `
+                        <button onclick="App.setTab('${item.id}')" class="flex flex-col items-center p-3 min-w-[4.5rem] relative ${App.state.activeTab === item.id ? 'text-blue-600' : 'text-slate-400'}">
+                            <i data-lucide="${item.icon}" class="w-5 h-5 mb-1 ${App.state.activeTab === item.id ? 'scale-110' : ''}"></i>
+                            <span class="text-[10px] font-medium">${item.label}</span>
+                            ${App.state.activeTab === item.id ? '<div class="absolute top-0 w-8 h-1 bg-blue-600 rounded-b-full"></div>' : ''}
+                        </button>
+                    `).join('')}
+                </div>
+            </nav>
+        `;
+
+        lucide.createIcons();
+
+        // Renderizado gráfico en Dashboard
+        if(App.state.activeTab === 'dashboard') {
+            const ctx = document.getElementById('lineChart');
+            if(ctx) {
+                const chartData = { labels: ['Oct', 'Nov', 'Dic'], ingresos: [66956000, 119571300, 114843500], gastos: [29107000, 45211300, 38800000]};
+                if(window.dashChart) window.dashChart.destroy();
+                window.dashChart = new Chart(ctx, {
+                    type: 'line',
+                    data: { labels: chartData.labels, datasets: [{ label: 'Ingresos', data: chartData.ingresos, borderColor: '#3b82f6', tension: 0.4, borderWidth: 3 }, { label: 'Gastos', data: chartData.gastos, borderColor: '#ef4444', tension: 0.4, borderWidth: 3 }]},
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { display: false } } }
+                });
+            }
+        }
+    }
 };
 
-export default function App() {
-  const [activeTab, setActiveTab] = useState('dashboard');
-
-  // Estados de datos
-  const [viajes, setViajes] = useState(initialViajes);
-  const [carteraViajes] = useState(initialCarteraViajes);
-  const [carteraClientes] = useState(initialCarteraClientes);
-  const [clientesDir, setClientesDir] = useState(initialClientesDirectorio);
-  const [nomina] = useState(initialNomina);
-  const [pagosNomina, setPagosNomina] = useState(initialHistorialPagosNomina);
-  const [socios] = useState(initialSocios);
-
-  // Estados de Modales y Formularios
-  const [selectedViaje, setSelectedViaje] = useState(null);
-  const [selectedCliente, setSelectedCliente] = useState(null);
-  
-  const [isAddViajeOpen, setIsAddViajeOpen] = useState(false);
-  const [isAddClienteOpen, setIsAddClienteOpen] = useState(false);
-  const [isAddNominaOpen, setIsAddNominaOpen] = useState(false);
-
-  const [niifTab, setNiifTab] = useState('estado-situacion');
-  const [docTab, setDocTab] = useState('escaner'); // Para módulo de documentos
-
-  // Estado del Formularios
-  const [nuevoViaje, setNuevoViaje] = useState({ fecha: '', ruta: '', ingreso: '', gastos: '', cartera: '', observaciones: '' });
-  const [nuevoCliente, setNuevoCliente] = useState({ nombre: '', tipo: 'Comerciante de Madera', telefono: '', ubicacion: '' });
-  const [nuevoPagoNomina, setNuevoPagoNomina] = useState({ fecha: '', viaje: '' });
-
-  // Nuevos estados para filtros solicitados
-  const [sociedadFiltroMes, setSociedadFiltroMes] = useState('Todos');
-  const [carteraViajeFiltro, setCarteraViajeFiltro] = useState('Todos');
-  
-  // Estado para simular carga inteligente
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadSuccess, setUploadSuccess] = useState(false);
-
-  // Totales Calculados
-  const totales = useMemo(() => {
-    const ingresoTotal = viajes.reduce((acc, curr) => acc + Number(curr.ingreso), 0);
-    const gastoTotal = viajes.reduce((acc, curr) => acc + Number(curr.gastos), 0);
-    const carteraTotal = carteraClientes.filter(c => c.estado === 'Pendiente').reduce((acc, curr) => acc + Number(curr.valorTotal), 0);
-    const utilidadNeta = ingresoTotal - gastoTotal;
-    const inversionTotal = socios.reduce((acc, curr) => acc + curr.inversion, 0);
-
-    return { ingresoTotal, gastoTotal, carteraTotal, utilidadNeta, inversionTotal };
-  }, [viajes, carteraClientes, socios]);
-
-  const navItems = [
-    { id: 'dashboard', label: 'Inicio', icon: TrendingUp },
-    { id: 'viajes', label: 'Viajes', icon: Ship },
-    { id: 'cartera', label: 'Cartera', icon: Wallet },
-    { id: 'documentos', label: 'Archivos', icon: FileScan },
-    { id: 'nomina', label: 'Nómina', icon: Users },
-    { id: 'clientes', label: 'Clientes', icon: Contact },
-    { id: 'finanzas', label: 'NIIF', icon: Landmark },
-    { id: 'sociedad', label: 'Sociedad', icon: Anchor },
-  ];
-
-  // --- MANEJADORES DE FORMULARIOS ---
-  const handleAddViaje = (e) => {
-    e.preventDefault();
-    const id = viajes.length + 1;
-    const nViaje = {
-      id,
-      viaje: `Viaje #${id}`,
-      fecha: nuevoViaje.fecha,
-      ruta: nuevoViaje.ruta,
-      ingreso: Number(nuevoViaje.ingreso),
-      gastos: Number(nuevoViaje.gastos),
-      cartera: Number(nuevoViaje.cartera),
-      observaciones: nuevoViaje.observaciones
-    };
-    setViajes([...viajes, nViaje]);
-    setIsAddViajeOpen(false);
-    setNuevoViaje({ fecha: '', ruta: '', ingreso: '', gastos: '', cartera: '', observaciones: '' });
-  };
-
-  const handleAddCliente = (e) => {
-    e.preventDefault();
-    const nCliente = {
-      id: clientesDir.length + 1,
-      nombre: nuevoCliente.nombre,
-      tipo: nuevoCliente.tipo,
-      telefono: nuevoCliente.telefono,
-      ubicacion: nuevoCliente.ubicacion
-    };
-    setClientesDir([...clientesDir, nCliente]);
-    setIsAddClienteOpen(false);
-    setNuevoCliente({ nombre: '', tipo: 'Comerciante de Madera', telefono: '', ubicacion: '' });
-  };
-
-  const handleAddPagoNomina = (e) => {
-    e.preventDefault();
-    const totalNomina = nomina.reduce((acc, curr) => acc + (curr.valorDia * curr.dias), 0);
-    const nPago = {
-      id: pagosNomina.length + 1,
-      fecha: nuevoPagoNomina.fecha,
-      viaje: nuevoPagoNomina.viaje,
-      valor: totalNomina,
-      estado: 'Pagado'
-    };
-    setPagosNomina([nPago, ...pagosNomina]);
-    setIsAddNominaOpen(false);
-    setNuevoPagoNomina({ fecha: '', viaje: '' });
-  };
-
-  const handleMockUpload = () => {
-    setIsUploading(true);
-    setUploadSuccess(false);
-    setTimeout(() => {
-      setIsUploading(false);
-      setUploadSuccess(true);
-    }, 2500);
-  };
-
-  // --- COMPONENTES DE MODALES ---
-  const ModalViaje = () => {
-    if (!selectedViaje) return null;
-    const v = selectedViaje;
-    const rentabilidad = ((v.ingreso - v.gastos) / v.ingreso) * 100;
-    
-    return (
-      <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in print:hidden">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
-          <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-            <h3 className="font-bold text-lg flex items-center"><Ship size={18} className="mr-2 text-blue-600"/> Detalles {v.viaje}</h3>
-            <button onClick={() => setSelectedViaje(null)} className="p-1 hover:bg-slate-200 rounded-full"><X size={20}/></button>
-          </div>
-          <div className="p-5 overflow-y-auto space-y-4">
-            <div className="flex justify-between items-center bg-blue-50 p-3 rounded-lg">
-              <span className="text-sm text-slate-600">Ruta</span>
-              <span className="font-bold text-slate-800">{v.ruta}</span>
-            </div>
-            <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100">
-              <span className="text-sm text-slate-600">Fecha de Registro</span>
-              <span className="font-medium text-slate-800">{v.fecha}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-green-50 p-3 rounded-lg border border-green-100">
-                <p className="text-xs text-green-700 font-bold mb-1">Ingresos</p>
-                <p className="font-black text-slate-800">{formatCOP(v.ingreso)}</p>
-              </div>
-              <div className="bg-red-50 p-3 rounded-lg border border-red-100">
-                <p className="text-xs text-red-700 font-bold mb-1">Gastos</p>
-                <p className="font-black text-slate-800">{formatCOP(v.gastos)}</p>
-              </div>
-            </div>
-            <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 flex justify-between items-center">
-              <span className="font-bold text-slate-700">Utilidad del Viaje</span>
-              <span className="font-black text-xl text-blue-600">{formatCOP(v.ingreso - v.gastos)}</span>
-            </div>
-            <div className="bg-orange-50 p-3 rounded-lg border border-orange-100 flex justify-between items-center">
-              <span className="font-bold text-orange-800 text-sm">Cartera Generada</span>
-              <span className="font-bold text-orange-600">{formatCOP(v.cartera)}</span>
-            </div>
-            <div className="mt-2">
-              <p className="text-xs font-bold text-slate-500 uppercase mb-1">Observaciones</p>
-              <p className="text-sm text-slate-700 bg-slate-50 p-3 rounded-lg">{v.observaciones || 'Sin observaciones detalladas.'}</p>
-            </div>
-            <div className="mt-4 text-center">
-              <p className="text-xs text-slate-500">Margen de Rentabilidad Operativa</p>
-              <p className="text-lg font-black text-slate-800">{rentabilidad.toFixed(1)}%</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const ModalCliente = () => {
-    if (!selectedCliente) return null;
-    const c = selectedCliente;
-    const infoDir = clientesDir.find(dir => c.cliente.includes(dir.nombre) || dir.nombre.includes(c.cliente)) || {};
-    const detalleViajes = carteraViajes.filter(cv => cv.cliente.includes(c.cliente) || c.cliente.includes(cv.cliente));
-
-    return (
-      <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in print:hidden">
-        <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
-          <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-            <h3 className="font-bold text-lg flex items-center"><Users size={18} className="mr-2 text-blue-600"/> Perfil Comercial: {c.cliente}</h3>
-            <button onClick={() => setSelectedCliente(null)} className="p-1 hover:bg-slate-200 rounded-full"><X size={20}/></button>
-          </div>
-          <div className="p-5 overflow-y-auto space-y-4">
-            
-            <div className="grid grid-cols-2 gap-2 text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">
-              <div><p className="text-xs text-slate-400 font-bold uppercase">Teléfono</p><p className="font-medium text-slate-700">{infoDir.telefono || 'No registrado'}</p></div>
-              <div><p className="text-xs text-slate-400 font-bold uppercase">Ubicación</p><p className="font-medium text-slate-700">{infoDir.ubicacion || 'No registrada'}</p></div>
-              <div className="col-span-2 mt-2"><p className="text-xs text-slate-400 font-bold uppercase">Tipo de Cliente</p><p className="font-medium text-slate-700">{infoDir.tipo || 'General'}</p></div>
-            </div>
-
-            <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center">
-              <p className="text-sm text-orange-800 font-bold mb-1">Deuda Total Consolidada</p>
-              <p className="text-3xl font-black text-orange-600">{formatCOP(c.valorTotal)}</p>
-            </div>
-            
-            <div>
-              <p className="text-xs font-bold text-slate-500 uppercase mb-2">Desglose de Deuda por Viaje</p>
-              {detalleViajes.length > 0 ? (
-                <div className="space-y-2">
-                  {detalleViajes.map((dv, idx) => (
-                    <div key={idx} className="bg-slate-50 border border-slate-100 p-3 rounded-lg flex justify-between items-center">
-                      <div>
-                        <p className="font-bold text-slate-800 text-sm">{dv.viaje}</p>
-                        <p className="text-xs text-slate-500">{dv.fecha} - {dv.concepto}</p>
-                      </div>
-                      <p className="font-bold text-orange-600 text-sm">{formatCOP(dv.valor)}</p>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-slate-500 italic bg-slate-50 p-3 rounded-lg">Deuda histórica consolidada no vinculada a viajes recientes.</p>
-              )}
-            </div>
-
-            <button className="w-full mt-4 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 transition">
-              Registrar Abono a {c.cliente}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // --- RENDERIZADO DE PESTAÑAS ---
-  const renderDashboard = () => {
-    const mesesNombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-    const ingresosPorMes = viajes.reduce((acc, v) => {
-      const [yyyy, mm] = v.fecha.split('-');
-      const month = `${mesesNombres[parseInt(mm) - 1]} ${yyyy}`;
-      if (!acc[month]) acc[month] = { mes: month, Ingresos: 0, Gastos: 0, Utilidad: 0 };
-      acc[month].Ingresos += Number(v.ingreso);
-      acc[month].Gastos += Number(v.gastos);
-      acc[month].Utilidad += (Number(v.ingreso) - Number(v.gastos));
-      return acc;
-    }, {});
-    const chartDataMeses = Object.values(ingresosPorMes);
-
-    const margenOperativo = totales.ingresoTotal > 0 ? ((totales.utilidadNeta / totales.ingresoTotal) * 100).toFixed(1) : 0;
-    const eficienciaRecaudo = totales.ingresoTotal > 0 ? (((totales.ingresoTotal - totales.carteraTotal) / totales.ingresoTotal) * 100).toFixed(1) : 0;
-    const roi = totales.inversionTotal > 0 ? ((totales.utilidadNeta / totales.inversionTotal) * 100).toFixed(2) : 0;
-
-    return (
-      <div className="space-y-6 animate-fade-in print:hidden">
-        <div>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-800">Dashboard Operativo</h2>
-          <p className="text-sm text-slate-500">M/N Greicy Jireth - KPIs en Tiempo Real</p>
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col min-w-0">
-            <div className="flex justify-between items-center mb-2">
-              <p className="text-xs font-bold text-slate-500 uppercase truncate">Ingresos</p>
-              <div className="p-1.5 bg-blue-50 rounded-lg text-blue-600 shrink-0"><TrendingUp size={16}/></div>
-            </div>
-            <h3 className="text-xl lg:text-2xl font-black text-slate-800 truncate">{formatCOP(totales.ingresoTotal)}</h3>
-          </div>
-          
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col min-w-0">
-            <div className="flex justify-between items-center mb-2">
-              <p className="text-xs font-bold text-slate-500 uppercase truncate">Gastos</p>
-              <div className="p-1.5 bg-red-50 rounded-lg text-red-600 shrink-0"><FileSpreadsheet size={16}/></div>
-            </div>
-            <h3 className="text-xl lg:text-2xl font-black text-slate-800 truncate">{formatCOP(totales.gastoTotal)}</h3>
-          </div>
-
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col min-w-0">
-            <div className="flex justify-between items-center mb-2">
-              <p className="text-xs font-bold text-slate-500 uppercase truncate">Utilidad</p>
-              <div className="p-1.5 bg-green-50 rounded-lg text-green-600 shrink-0"><TrendingUp size={16}/></div>
-            </div>
-            <h3 className="text-xl lg:text-2xl font-black text-slate-800 truncate">{formatCOP(totales.utilidadNeta)}</h3>
-          </div>
-
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col min-w-0">
-            <div className="flex justify-between items-center mb-2">
-              <p className="text-xs font-bold text-slate-500 uppercase truncate">Cartera</p>
-              <div className="p-1.5 bg-orange-50 rounded-lg text-orange-600 shrink-0"><AlertCircle size={16}/></div>
-            </div>
-            <h3 className="text-xl lg:text-2xl font-black text-slate-800 truncate">{formatCOP(totales.carteraTotal)}</h3>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Gráfico Lineal Actualizado */}
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-80 flex flex-col">
-            <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center">
-              <TrendingUp className="mr-2 text-blue-600" size={18}/> 
-              Tendencia Financiera (Lineal)
-            </h3>
-            <div className="flex-1 min-h-0">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartDataMeses} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                  <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{fontSize: 10}} dy={10} />
-                  <YAxis axisLine={false} tickLine={false} tick={{fontSize: 10}} tickFormatter={(v) => `$${v/1000000}M`} />
-                  <RechartsTooltip formatter={(v) => formatCOP(v)} contentStyle={{fontSize: '12px', borderRadius: '8px'}}/>
-                  <Legend iconType="circle" wrapperStyle={{fontSize: '11px', paddingTop: '10px'}}/>
-                  <Line type="monotone" dataKey="Ingresos" name="Ingresos" stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} activeDot={{r: 6}} />
-                  <Line type="monotone" dataKey="Gastos" name="Gastos" stroke="#ef4444" strokeWidth={3} dot={{r: 4}} activeDot={{r: 6}} />
-                  <Line type="monotone" dataKey="Utilidad" name="Utilidad Neta" stroke="#22c55e" strokeWidth={3} dot={{r: 4}} activeDot={{r: 6}} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-80 flex flex-col">
-            <h3 className="text-sm font-bold text-slate-800 mb-6 flex items-center"><TrendingUp className="mr-2 text-green-500" size={18}/> Eficiencia y Rendimiento</h3>
-            
-            <div className="flex-1 flex flex-col justify-around">
-              <div>
-                <div className="flex justify-between items-end mb-1">
-                  <span className="text-xs font-bold text-slate-500 uppercase">Margen Operativo</span>
-                  <span className="text-sm font-black text-slate-800">{margenOperativo}%</span>
-                </div>
-                <div className="w-full bg-slate-100 rounded-full h-2.5">
-                  <div className="bg-blue-500 h-2.5 rounded-full" style={{ width: `${Math.min(margenOperativo, 100)}%` }}></div>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">Porcentaje de ingresos convertidos en utilidad</p>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-end mb-1">
-                  <span className="text-xs font-bold text-slate-500 uppercase">Eficiencia de Recaudo</span>
-                  <span className="text-sm font-black text-slate-800">{eficienciaRecaudo}%</span>
-                </div>
-                <div className="w-full bg-slate-100 rounded-full h-2.5">
-                  <div className={`h-2.5 rounded-full ${eficienciaRecaudo >= 70 ? 'bg-green-500' : 'bg-orange-500'}`} style={{ width: `${Math.min(eficienciaRecaudo, 100)}%` }}></div>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">Ingresos efectivamente cobrados (vs cartera)</p>
-              </div>
-
-              <div>
-                <div className="flex justify-between items-end mb-1">
-                  <span className="text-xs font-bold text-slate-500 uppercase">Retorno de Inversión (ROI)</span>
-                  <span className="text-sm font-black text-slate-800">{roi}%</span>
-                </div>
-                <div className="w-full bg-slate-100 rounded-full h-2.5">
-                  <div className="bg-indigo-500 h-2.5 rounded-full" style={{ width: `${Math.min(roi, 100)}%` }}></div>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">Rentabilidad acumulada vs Inversión de {formatCOP(totales.inversionTotal)}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderCartera = () => {
-    const carteraViajesFiltrada = carteraViajeFiltro === 'Todos' 
-      ? carteraViajes 
-      : carteraViajes.filter(cv => cv.viaje === carteraViajeFiltro);
-
-    // Totalizador de Cartera Filtrada (Nueva Función)
-    const totalCarteraFiltrada = carteraViajesFiltrada.reduce((sum, item) => sum + item.valor, 0);
-
-    return (
-      <div className="space-y-6 animate-fade-in print:hidden">
-        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-          <div>
-            <h2 className="text-xl md:text-2xl font-bold text-slate-800">Cartera de Clientes</h2>
-            <p className="text-sm text-slate-500">Deudas consolidadas y por viaje</p>
-          </div>
-          <div className="bg-orange-100 text-orange-800 px-4 py-2.5 rounded-xl font-black text-center border border-orange-200">
-            Total Exigible: {formatCOP(totales.carteraTotal)}
-          </div>
-        </div>
-
-        <div>
-          <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center"><Wallet className="mr-2 text-slate-400" size={18}/> Consolidado de Deudas</h3>
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[700px]">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 text-xs uppercase font-bold">
-                    <th className="p-4">Cliente</th>
-                    <th className="p-4">Concepto General</th>
-                    <th className="p-4">Ref. Viajes</th>
-                    <th className="p-4 text-center">Estado</th>
-                    <th className="p-4 text-right">Total Adeudado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {carteraClientes.map((c) => (
-                    <tr key={c.id} onClick={() => setSelectedCliente(c)} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition">
-                      <td className="p-4 font-bold text-slate-800">{c.cliente}</td>
-                      <td className="p-4 text-sm text-slate-600 max-w-[200px] truncate" title={c.conceptoGeneral}>{c.conceptoGeneral}</td>
-                      <td className="p-4 text-xs text-slate-500">{c.viajesAsociados}</td>
-                      <td className="p-4 text-center">
-                        <span className="inline-flex items-center text-[10px] font-bold uppercase bg-orange-100 text-orange-700 px-2 py-1 rounded-md">
-                          <Clock size={12} className="mr-1"/> {c.estado}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right font-bold text-orange-600">{formatCOP(c.valorTotal)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-8">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
-            <h3 className="text-lg font-bold text-slate-800 flex items-center"><Ship className="mr-2 text-slate-400" size={18}/> Desglose de Cartera por Viaje</h3>
-            <select 
-              value={carteraViajeFiltro} 
-              onChange={(e) => setCarteraViajeFiltro(e.target.value)}
-              className="border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 bg-white shadow-sm"
-            >
-              <option value="Todos">Ver Todos los Viajes</option>
-              {viajes.map(v => <option key={v.id} value={v.viaje}>{v.viaje} ({v.fecha})</option>)}
-            </select>
-          </div>
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[600px]">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 text-xs uppercase font-bold">
-                    <th className="p-4">Viaje Relacionado</th>
-                    <th className="p-4">Cliente</th>
-                    <th className="p-4">Concepto</th>
-                    <th className="p-4 text-right">Monto</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {carteraViajesFiltrada.length > 0 ? carteraViajesFiltrada.map((cv) => (
-                    <tr key={cv.id} className="border-b border-slate-50 hover:bg-slate-50">
-                      <td className="p-4">
-                        <p className="font-bold text-slate-800 text-sm">{cv.viaje}</p>
-                        <p className="text-[10px] text-slate-500">{cv.fecha}</p>
-                      </td>
-                      <td className="p-4 text-sm font-medium text-slate-700">{cv.cliente}</td>
-                      <td className="p-4 text-sm text-slate-500">{cv.concepto}</td>
-                      <td className="p-4 text-right font-bold text-orange-600">{formatCOP(cv.valor)}</td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan="4" className="p-8 text-center text-slate-500 text-sm">No hay deudas registradas para el viaje seleccionado.</td>
-                    </tr>
-                  )}
-                  {/* Totalizador Agregado */}
-                  {carteraViajesFiltrada.length > 0 && (
-                    <tr className="bg-orange-50/50">
-                      <td colSpan="3" className="p-4 font-bold text-right text-orange-900 text-sm uppercase">
-                        {carteraViajeFiltro === 'Todos' ? 'Suma Total Desglosada:' : `Total Cartera ${carteraViajeFiltro}:`}
-                      </td>
-                      <td className="p-4 font-black text-right text-orange-700 text-lg">{formatCOP(totalCarteraFiltrada)}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // --- NUEVO MÓDULO: DOCUMENTOS, ESCÁNER Y FORMATOS PARA IMPRIMIR ---
-  const renderDocumentos = () => (
-    <div className="space-y-6 animate-fade-in">
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 print:hidden">
-        <div>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-800">Centro de Documentos</h2>
-          <p className="text-sm text-slate-500">Digitalización de facturas y formatos de registro manual</p>
-        </div>
-        <button onClick={() => window.print()} className="bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-sm hover:bg-slate-800 transition flex items-center justify-center font-semibold">
-          <Printer size={18} className="mr-2" /> Imprimir Formato Actual
-        </button>
-      </div>
-
-      <div className="flex space-x-2 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden print:hidden">
-        {[
-          { id: 'escaner', label: 'Escanear / Subir Archivos', icon: UploadCloud },
-          { id: 'formato-ingresos', label: 'Formato Ingresos (Manual)', icon: FileText },
-          { id: 'formato-gastos', label: 'Formato Gastos (Manual)', icon: FileText }
-        ].map((tab) => (
-          <button 
-            key={tab.id} 
-            onClick={() => setDocTab(tab.id)}
-            className={`flex items-center px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${docTab === tab.id ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
-          >
-            <tab.icon size={16} className="mr-2"/> {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Sub-Módulo Escáner */}
-      {docTab === 'escaner' && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-10 text-center animate-fade-in print:hidden">
-          <h3 className="font-bold text-xl text-slate-800 mb-2">Carga Inteligente de Documentos</h3>
-          <p className="text-sm text-slate-500 mb-8">Sube archivos PDF o fotografías de facturas y manifiestos para extraer los datos automáticamente.</p>
-          
-          <div className="border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer hover:bg-blue-50 transition">
-            <FileImage size={48} className="text-blue-400 mb-4" />
-            <p className="font-bold text-slate-700 text-lg">Arrastra tu PDF o Imagen aquí</p>
-            <p className="text-xs text-slate-500 mt-2 mb-6">Formatos soportados: .PDF, .JPG, .PNG</p>
-            <button onClick={handleMockUpload} disabled={isUploading} className="bg-blue-600 text-white px-6 py-3 rounded-xl shadow-sm hover:bg-blue-700 transition font-bold disabled:bg-slate-400 flex items-center">
-              {isUploading ? 'Procesando Documento...' : 'Seleccionar Archivo'}
-            </button>
-          </div>
-
-          {uploadSuccess && (
-            <div className="mt-8 bg-green-50 border border-green-200 p-6 rounded-xl text-left animate-slide-up">
-              <div className="flex items-center text-green-700 font-bold text-lg mb-4">
-                <CheckCircle size={24} className="mr-2"/> Documento Analizado Exitosamente
-              </div>
-              <p className="text-sm text-slate-700 mb-4">Los siguientes datos fueron extraídos de la factura o reporte:</p>
-              <div className="bg-white rounded-lg p-4 border border-green-100">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div><span className="font-bold text-slate-500 block">Concepto Detectado</span>Combustible (Acpm)</div>
-                  <div><span className="font-bold text-slate-500 block">Fecha</span>15/12/2025</div>
-                  <div><span className="font-bold text-slate-500 block">Proveedor</span>Estación de Servicio XYZ</div>
-                  <div><span className="font-bold text-slate-500 block">Valor Extraído</span><span className="text-lg font-black text-slate-800">$ 3,450,000</span></div>
-                </div>
-                <button className="w-full mt-4 bg-slate-900 text-white py-2 rounded-lg font-bold hover:bg-slate-800 transition">
-                  Registrar en el Sistema
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Sub-Módulo Formato Ingresos (Diseñado para Imprimir) */}
-      {docTab === 'formato-ingresos' && (
-        <div className="bg-white border border-slate-200 p-8 shadow-sm">
-          <div className="text-center mb-6 border-b-2 border-slate-800 pb-4">
-            <h1 className="text-2xl font-black text-slate-900 uppercase">Transporte Marítimo y Fluvial Don Sebe</h1>
-            <h2 className="text-lg font-bold text-slate-700">M/N Greicy Jireth</h2>
-            <h3 className="text-base font-semibold text-slate-600 mt-2">REPORTE MANUAL DE INGRESOS Y FLETES</h3>
-          </div>
-          <div className="flex justify-between text-sm font-bold text-slate-800 mb-4">
-            <div>Viaje N°: ___________________</div>
-            <div>Fecha Cierre: ___________________</div>
-            <div>Firma Capitán/Admin: ___________________</div>
-          </div>
-          <table className="w-full text-left border-collapse border border-slate-800 text-sm">
-            <thead>
-              <tr className="bg-slate-100">
-                <th className="border border-slate-800 p-2 w-24">Fecha</th>
-                <th className="border border-slate-800 p-2 w-48">Cliente / Remitente</th>
-                <th className="border border-slate-800 p-2">Concepto / Carga (Cant. Madera)</th>
-                <th className="border border-slate-800 p-2 w-32 text-right">Flete ($)</th>
-                <th className="border border-slate-800 p-2 w-24 text-center">Estado (P/D)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 15 }).map((_, i) => (
-                <tr key={i}>
-                  <td className="border border-slate-800 p-4"></td>
-                  <td className="border border-slate-800 p-4"></td>
-                  <td className="border border-slate-800 p-4"></td>
-                  <td className="border border-slate-800 p-4"></td>
-                  <td className="border border-slate-800 p-4"></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p className="text-xs text-slate-500 mt-4">*Estado: P = Pagado, D = Debe (Pasa a Cartera)</p>
-        </div>
-      )}
-
-      {/* Sub-Módulo Formato Gastos (Diseñado para Imprimir) */}
-      {docTab === 'formato-gastos' && (
-        <div className="bg-white border border-slate-200 p-8 shadow-sm">
-          <div className="text-center mb-6 border-b-2 border-slate-800 pb-4">
-            <h1 className="text-2xl font-black text-slate-900 uppercase">Transporte Marítimo y Fluvial Don Sebe</h1>
-            <h2 className="text-lg font-bold text-slate-700">M/N Greicy Jireth</h2>
-            <h3 className="text-base font-semibold text-slate-600 mt-2">REPORTE MANUAL DE GASTOS OPERATIVOS</h3>
-          </div>
-          <div className="flex justify-between text-sm font-bold text-slate-800 mb-4">
-            <div>Viaje N°: ___________________</div>
-            <div>Fecha Cierre: ___________________</div>
-            <div>Firma Capitán/Admin: ___________________</div>
-          </div>
-          <table className="w-full text-left border-collapse border border-slate-800 text-sm">
-            <thead>
-              <tr className="bg-slate-100">
-                <th className="border border-slate-800 p-2 w-24">Fecha</th>
-                <th className="border border-slate-800 p-2 w-48">Proveedor / Pagado A</th>
-                <th className="border border-slate-800 p-2">Concepto del Gasto (Combustible, Zarpe, etc.)</th>
-                <th className="border border-slate-800 p-2 w-32 text-right">Valor ($)</th>
-                <th className="border border-slate-800 p-2 w-24 text-center">Firma Recibido</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Array.from({ length: 15 }).map((_, i) => (
-                <tr key={i}>
-                  <td className="border border-slate-800 p-4"></td>
-                  <td className="border border-slate-800 p-4"></td>
-                  <td className="border border-slate-800 p-4"></td>
-                  <td className="border border-slate-800 p-4"></td>
-                  <td className="border border-slate-800 p-4"></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-
-  // Funciones de renderizado originales restantes 
-  const renderNIIF = () => (
-    <div className="space-y-6 animate-fade-in print:hidden">
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-        <div>
-          <h2 className="text-xl md:text-2xl font-black text-slate-800 flex items-center"><Landmark className="mr-2 text-blue-600"/> Módulo Financiero NIIF</h2>
-          <p className="text-sm text-slate-500">Informes contables consolidados M/N Greicy Jireth</p>
-        </div>
-      </div>
-
-      <div className="flex space-x-2 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden">
-        {['estado-situacion', 'resultados', 'patrimonio', 'notas'].map((tab) => (
-          <button 
-            key={tab} 
-            onClick={() => setNiifTab(tab)}
-            className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${niifTab === tab ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
-          >
-            {tab.replace('-', ' ').toUpperCase()}
-          </button>
-        ))}
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-6 min-h-[400px]">
-        {niifTab === 'estado-situacion' && (
-          <div className="animate-fade-in space-y-6">
-            <h3 className="font-bold text-lg text-slate-800 border-b pb-2">1. Estado de Situación Financiera (Balance General)</h3>
-            <div className="grid md:grid-cols-2 gap-8">
-              <div>
-                <h4 className="font-black text-slate-700 mb-3 bg-slate-50 p-2 rounded">ACTIVOS</h4>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between text-slate-600"><span>Efectivo y Equivalentes (Caja)</span><span>{formatCOP(totales.utilidadNeta - totales.carteraTotal)}</span></div>
-                  <div className="flex justify-between text-slate-600"><span>Cuentas por Cobrar (Cartera)</span><span>{formatCOP(totales.carteraTotal)}</span></div>
-                  <div className="flex justify-between text-slate-600"><span>Propiedad, Planta y Equipo (Barco)</span><span>{formatCOP(totales.inversionTotal)}</span></div>
-                  <div className="flex justify-between font-bold text-slate-800 pt-2 border-t"><span>TOTAL ACTIVOS</span><span>{formatCOP(totales.inversionTotal + totales.utilidadNeta)}</span></div>
-                </div>
-              </div>
-              <div>
-                <h4 className="font-black text-slate-700 mb-3 bg-slate-50 p-2 rounded">PASIVOS Y PATRIMONIO</h4>
-                <div className="space-y-2 text-sm mb-4">
-                  <div className="flex justify-between text-slate-600"><span>Cuentas por Pagar (Mantenimiento Socio 40%)</span><span>{formatCOP(12211288)}</span></div>
-                  <div className="flex justify-between font-bold text-slate-800 pt-2 border-t"><span>TOTAL PASIVOS</span><span>{formatCOP(12211288)}</span></div>
-                </div>
-                <div className="space-y-2 text-sm">
-                  <div className="flex justify-between text-slate-600"><span>Capital Social (Aportes Socios)</span><span>{formatCOP(totales.inversionTotal)}</span></div>
-                  <div className="flex justify-between text-slate-600"><span>Utilidades del Ejercicio Retenidas</span><span>{formatCOP(totales.utilidadNeta - 12211288)}</span></div>
-                  <div className="flex justify-between font-bold text-slate-800 pt-2 border-t"><span>TOTAL PATRIMONIO</span><span>{formatCOP(totales.inversionTotal + totales.utilidadNeta - 12211288)}</span></div>
-                </div>
-                <div className="flex justify-between font-black text-blue-700 pt-4 mt-4 border-t-2 border-blue-100">
-                  <span>TOTAL PASIVO + PATRIMONIO</span><span>{formatCOP(totales.inversionTotal + totales.utilidadNeta)}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {niifTab === 'resultados' && (
-          <div className="animate-fade-in max-w-2xl mx-auto">
-            <h3 className="font-bold text-lg text-slate-800 border-b pb-2 mb-6">2. Estado de Resultados Integrales (P&G)</h3>
-            <div className="space-y-3 text-sm">
-              <div className="flex justify-between font-bold text-slate-700 bg-slate-50 p-2 rounded"><span>Ingresos Ordinarios (Fletes Marítimos)</span><span>{formatCOP(totales.ingresoTotal)}</span></div>
-              <div className="flex justify-between text-slate-600 px-2"><span>(-) Costos de Operación Directa (Combustible, Zarpe)</span><span className="text-red-500">-{formatCOP(totales.gastoTotal * 0.7)}</span></div>
-              <div className="flex justify-between text-slate-600 px-2"><span>(-) Costos Laborales (Nómina Tripulación)</span><span className="text-red-500">-{formatCOP(totales.gastoTotal * 0.3)}</span></div>
-              <div className="flex justify-between font-black text-lg text-slate-800 pt-4 border-t"><span>UTILIDAD BRUTA (Operacional)</span><span>{formatCOP(totales.utilidadNeta)}</span></div>
-              <div className="flex justify-between text-slate-600 px-2 mt-4"><span>(-) Gastos Administrativos o Financieros</span><span>{formatCOP(0)}</span></div>
-              <div className="flex justify-between font-black text-xl text-green-600 pt-4 border-t border-green-200 mt-2"><span>UTILIDAD NETA DEL EJERCICIO</span><span>{formatCOP(totales.utilidadNeta)}</span></div>
-            </div>
-          </div>
-        )}
-
-        {niifTab === 'patrimonio' && (
-          <div className="animate-fade-in">
-            <h3 className="font-bold text-lg text-slate-800 border-b pb-2 mb-6">3. Estado de Cambios en el Patrimonio</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm border-collapse min-w-[600px]">
-                <thead>
-                  <tr className="bg-slate-50 border-b font-bold text-slate-600">
-                    <th className="p-3">Socio / Accionista</th>
-                    <th className="p-3">%</th>
-                    <th className="p-3 text-right">Inversión Inicial</th>
-                    <th className="p-3 text-right">Deducción Mantenimiento</th>
-                    <th className="p-3 text-right">Patrimonio Neto a la Fecha</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {socios.map((s, i) => (
-                    <tr key={i} className="border-b hover:bg-slate-50">
-                      <td className="p-3 font-medium text-slate-800">{s.nombre}</td>
-                      <td className="p-3">{s.porcentaje}%</td>
-                      <td className="p-3 text-right">{formatCOP(s.inversion)}</td>
-                      <td className="p-3 text-right text-red-500">{s.saldoMantenimiento < 0 ? formatCOP(s.saldoMantenimiento) : '$0'}</td>
-                      <td className="p-3 text-right font-bold text-slate-800">{formatCOP(s.inversion + s.saldoMantenimiento)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {niifTab === 'notas' && (
-          <div className="animate-fade-in space-y-6">
-            <h3 className="font-bold text-lg text-slate-800 border-b pb-2">Notas a los Estados Financieros</h3>
-            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-              <h4 className="font-bold text-blue-900 mb-2 flex items-center"><Info size={16} className="mr-2"/> Nota 1: Cruce de Cuentas Socio 40% (PRI)</h4>
-              <p className="text-sm text-blue-800 leading-relaxed">
-                Según el balance de inversión y mantenimiento, el socio 40% (PRI) no tiene utilidades disponibles para retiro en el periodo actual. Estas han sido absorbidas en su totalidad por el cruce de cuentas correspondiente al mantenimiento inicial del buque. Se presenta un saldo en contra pendiente por pagar a la sociedad de **$12,211,288 COP**.
-              </p>
-            </div>
-            <div className="bg-orange-50 p-4 rounded-xl border border-orange-100">
-              <h4 className="font-bold text-orange-900 mb-2 flex items-center"><AlertCircle size={16} className="mr-2"/> Nota 2: Concentración de Riesgo de Cartera</h4>
-              <p className="text-sm text-orange-800 leading-relaxed">
-                Se evidencia un alto riesgo de liquidez debido a que el 89.5% de la deuda se originó en el Periodo 1. La cartera está altamente concentrada en tres clientes principales: Alex, John Jairo Silva y Oscar. La recuperación de este efectivo es prioritaria para sanear el flujo de caja operativo y cubrir deducciones pendientes.
-              </p>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderSociedad = () => {
-    const mesesDisponibles = [...new Set(viajes.map(v => v.fecha.substring(0, 7)))].sort();
-    
-    const viajesFiltrados = sociedadFiltroMes === 'Todos' 
-      ? viajes 
-      : viajes.filter(v => v.fecha.startsWith(sociedadFiltroMes));
-
-    const utilidadPeriodo = viajesFiltrados.reduce((acc, v) => acc + (v.ingreso - v.gastos), 0);
-
-    return (
-      <div className="space-y-6 animate-fade-in print:hidden">
-        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-          <div>
-            <h2 className="text-xl md:text-2xl font-bold text-slate-800">Participación Societaria</h2>
-            <p className="text-sm text-slate-500">Inversión, utilidades y cruce de caja</p>
-          </div>
-          <div className="flex items-center space-x-2">
-            <span className="text-sm font-bold text-slate-600 whitespace-nowrap">Periodo:</span>
-            <select 
-              value={sociedadFiltroMes} 
-              onChange={(e) => setSociedadFiltroMes(e.target.value)}
-              className="border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 bg-white shadow-sm"
-            >
-              <option value="Todos">Histórico Total</option>
-              {mesesDisponibles.map(mes => (
-                <option key={mes} value={mes}>Mes: {mes}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-blue-100 bg-blue-50/50 flex justify-between items-center shadow-sm">
-          <span className="text-blue-800 font-bold text-sm">Utilidad generada en este periodo ({sociedadFiltroMes}):</span>
-          <span className="text-blue-700 font-black text-xl md:text-2xl">{formatCOP(utilidadPeriodo)}</span>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse min-w-[800px]">
-              <thead>
-                <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 text-xs uppercase font-bold">
-                  <th className="p-4">Socio</th>
-                  <th className="p-4 text-center">% Part.</th>
-                  <th className="p-4 text-right">Inversión Base</th>
-                  <th className="p-4 text-right">Utilidad Bruta</th>
-                  <th className="p-4 text-right">Deuda Mantenimiento</th>
-                  <th className="p-4 text-right bg-green-50/50">Líquido a Recibir</th>
-                </tr>
-              </thead>
-              <tbody>
-                {socios.map((s, i) => {
-                  const utilidadBrutaSocio = utilidadPeriodo * (s.porcentaje / 100);
-                  let liquidoARecibir = utilidadBrutaSocio;
-
-                  if (s.saldoMantenimiento < 0) {
-                    const deudaAbsoluta = Math.abs(s.saldoMantenimiento);
-                    if (utilidadBrutaSocio >= deudaAbsoluta) {
-                      liquidoARecibir = utilidadBrutaSocio - deudaAbsoluta;
-                    } else {
-                      liquidoARecibir = 0; 
-                    }
-                  }
-
-                  return (
-                    <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 transition">
-                      <td className="p-4">
-                        <div className="flex items-center">
-                          <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center font-bold mr-3 shrink-0">
-                            {s.nombre.charAt(0)}
-                          </div>
-                          <span className="font-bold text-slate-800">{s.nombre}</span>
-                        </div>
-                      </td>
-                      <td className="p-4 text-center font-black text-blue-600">{s.porcentaje}%</td>
-                      <td className="p-4 text-right text-slate-600 text-sm">{formatCOP(s.inversion)}</td>
-                      <td className="p-4 text-right font-bold text-slate-700">{formatCOP(utilidadBrutaSocio)}</td>
-                      <td className="p-4 text-right">
-                        <span className={s.saldoMantenimiento < 0 ? 'text-red-500 font-bold text-xs bg-red-50 px-2 py-1 rounded' : 'text-slate-400 text-xs'}>
-                          {s.saldoMantenimiento < 0 ? formatCOP(s.saldoMantenimiento) : 'Sin deuda'}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right bg-green-50/30">
-                        <span className={`font-black text-lg ${liquidoARecibir > 0 ? 'text-green-600' : 'text-slate-400'}`}>
-                          {formatCOP(liquidoARecibir)}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderViajes = () => (
-    <div className="space-y-6 animate-fade-in print:hidden">
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-        <div>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-800">Gestión de Viajes</h2>
-          <p className="text-sm text-slate-500">Historial operativo y registro</p>
-        </div>
-        <button onClick={() => setIsAddViajeOpen(true)} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl shadow-sm hover:bg-blue-700 transition flex items-center justify-center font-semibold">
-          <Plus size={18} className="mr-2" /> Cargar Nuevo Viaje
-        </button>
-      </div>
-
-      <div className="grid gap-3">
-        {viajes.slice().reverse().map((v) => (
-          <div key={v.id} onClick={() => setSelectedViaje(v)} className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between cursor-pointer hover:border-blue-300 hover:shadow-md transition group">
-            <div className="flex items-center mb-3 sm:mb-0">
-              <div className="bg-slate-100 p-3 rounded-lg mr-4 group-hover:bg-blue-50 group-hover:text-blue-600 transition"><Map size={20}/></div>
-              <div>
-                <h4 className="font-bold text-slate-800">{v.viaje} <span className="text-xs text-slate-400 font-normal ml-2">{v.fecha}</span></h4>
-                <p className="text-sm text-slate-500">{v.ruta}</p>
-              </div>
-            </div>
-            <div className="flex items-center justify-between sm:justify-end w-full sm:w-auto sm:space-x-6 bg-slate-50 sm:bg-transparent p-3 sm:p-0 rounded-lg">
-              <div className="text-left sm:text-right">
-                <p className="text-[10px] uppercase font-bold text-slate-400">Ingreso</p>
-                <p className="font-bold text-green-600">{formatCOP(v.ingreso)}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-[10px] uppercase font-bold text-slate-400">Utilidad</p>
-                <p className="font-black text-slate-800">{formatCOP(v.ingreso - v.gastos)}</p>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {isAddViajeOpen && (
-        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-lg sm:rounded-2xl rounded-t-2xl p-6 animate-slide-up sm:animate-fade-in max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-xl text-slate-800">Registrar Nuevo Viaje</h3>
-              <button onClick={() => setIsAddViajeOpen(false)} className="p-1 hover:bg-slate-100 rounded-full"><X size={20}/></button>
-            </div>
-            <form onSubmit={handleAddViaje} className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Fecha</label>
-                  <input type="date" required value={nuevoViaje.fecha} onChange={e => setNuevoViaje({...nuevoViaje, fecha: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"/>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Ruta</label>
-                  <input type="text" required placeholder="Ej: B/tura - Tumaco" value={nuevoViaje.ruta} onChange={e => setNuevoViaje({...nuevoViaje, ruta: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"/>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Ingreso Bruto</label>
-                <input type="number" required placeholder="0" value={nuevoViaje.ingreso} onChange={e => setNuevoViaje({...nuevoViaje, ingreso: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"/>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Costos Operativos Totales</label>
-                <input type="number" required placeholder="0" value={nuevoViaje.gastos} onChange={e => setNuevoViaje({...nuevoViaje, gastos: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"/>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Valor enviado a Cartera (Si aplica)</label>
-                <input type="number" placeholder="0" value={nuevoViaje.cartera} onChange={e => setNuevoViaje({...nuevoViaje, cartera: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"/>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Observaciones</label>
-                <textarea rows="2" placeholder="Detalles de carga" value={nuevoViaje.observaciones} onChange={e => setNuevoViaje({...nuevoViaje, observaciones: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"></textarea>
-              </div>
-              <button type="submit" className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl mt-4 hover:bg-slate-800 transition">
-                Guardar Viaje
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderClientes = () => (
-    <div className="space-y-6 animate-fade-in print:hidden">
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-        <div>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-800">Directorio de Clientes</h2>
-          <p className="text-sm text-slate-500">Gestión de contactos comerciales</p>
-        </div>
-        <button onClick={() => setIsAddClienteOpen(true)} className="bg-blue-600 text-white px-4 py-2.5 rounded-xl shadow-sm hover:bg-blue-700 transition flex items-center justify-center font-semibold">
-          <UserPlus size={18} className="mr-2" /> Nuevo Cliente
-        </button>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[800px]">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 text-xs uppercase font-bold">
-                <th className="p-4">Cliente</th>
-                <th className="p-4">Tipo de Actividad</th>
-                <th className="p-4">Teléfono</th>
-                <th className="p-4">Ubicación</th>
-                <th className="p-4 text-right">Estado Cartera</th>
-              </tr>
-            </thead>
-            <tbody>
-              {clientesDir.map((c) => {
-                const deudaInfo = carteraClientes.find(car => car.cliente.includes(c.nombre) || c.nombre.includes(car.cliente));
-                const tieneDeuda = deudaInfo && deudaInfo.estado === 'Pendiente';
-
-                return (
-                  <tr key={c.id} className="border-b border-slate-50 hover:bg-slate-50 cursor-pointer transition" onClick={() => tieneDeuda ? setSelectedCliente(deudaInfo) : null}>
-                    <td className="p-4">
-                      <div className="flex items-center">
-                        <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mr-3 shrink-0">
-                          {c.nombre.charAt(0)}
-                        </div>
-                        <span className="font-bold text-slate-800">{c.nombre}</span>
-                      </div>
-                    </td>
-                    <td className="p-4 text-sm text-slate-600">
-                      <span className="bg-slate-100 px-2 py-1 rounded-md text-xs">{c.tipo}</span>
-                    </td>
-                    <td className="p-4 text-sm text-slate-600">{c.telefono}</td>
-                    <td className="p-4 text-sm text-slate-600">{c.ubicacion}</td>
-                    <td className="p-4 text-right">
-                      <div className={`inline-block px-3 py-1 rounded-lg text-xs font-bold ${tieneDeuda ? 'bg-orange-50 text-orange-700 border border-orange-100' : 'bg-green-50 text-green-700 border border-green-100'}`}>
-                        {tieneDeuda ? formatCOP(deudaInfo.valorTotal) : 'A Paz y Salvo'}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {isAddClienteOpen && (
-        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-lg sm:rounded-2xl rounded-t-2xl p-6 animate-slide-up sm:animate-fade-in">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-bold text-xl text-slate-800">Registrar Cliente</h3>
-              <button onClick={() => setIsAddClienteOpen(false)} className="p-1 hover:bg-slate-100 rounded-full"><X size={20}/></button>
-            </div>
-            <form onSubmit={handleAddCliente} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Nombre Comercial / Contacto</label>
-                <input type="text" required placeholder="Ej: Maderas del Sur / Juan Perez" value={nuevoCliente.nombre} onChange={e => setNuevoCliente({...nuevoCliente, nombre: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"/>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Teléfono</label>
-                  <input type="text" required placeholder="Ej: 310..." value={nuevoCliente.telefono} onChange={e => setNuevoCliente({...nuevoCliente, telefono: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"/>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Ubicación</label>
-                  <input type="text" required placeholder="Ej: Buenaventura" value={nuevoCliente.ubicacion} onChange={e => setNuevoCliente({...nuevoCliente, ubicacion: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"/>
-                </div>
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">Tipo de Actividad</label>
-                <select value={nuevoCliente.tipo} onChange={e => setNuevoCliente({...nuevoCliente, tipo: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white">
-                  <option>Comerciante de Madera</option>
-                  <option>Materiales Construcción</option>
-                  <option>Equipos e Insumos</option>
-                  <option>Institucional / Salud</option>
-                  <option>Comerciante General</option>
-                </select>
-              </div>
-              <button type="submit" className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl mt-4 hover:bg-slate-800 transition">
-                Guardar Cliente
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderNomina = () => {
-    const totalNominaDiaria = nomina.reduce((acc, curr) => acc + curr.valorDia, 0);
-    const totalNominaViaje = nomina.reduce((acc, curr) => acc + (curr.valorDia * curr.dias), 0);
-
-    return (
-      <div className="space-y-6 animate-fade-in print:hidden">
-        <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-          <div>
-            <h2 className="text-xl md:text-2xl font-bold text-slate-800">Gestión de Nómina</h2>
-            <p className="text-sm text-slate-500">Tripulación M/N Greicy Jireth y liquidaciones</p>
-          </div>
-          <button onClick={() => setIsAddNominaOpen(true)} className="bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-sm hover:bg-slate-800 transition flex items-center justify-center font-semibold">
-            <BadgeDollarSign size={18} className="mr-2" /> Liquidar Nómina
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-            <div className="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-              <h3 className="text-lg font-bold text-slate-800 flex items-center"><Users size={18} className="mr-2 text-slate-500"/> Tarifas de Tripulación</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="text-slate-500 text-xs uppercase bg-white border-b">
-                    <th className="p-4 font-bold">Cargo</th>
-                    <th className="p-4 font-bold text-right">Tarifa Día</th>
-                    <th className="p-4 font-bold text-right">Ref. Viaje (5D)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {nomina.map((n, i) => (
-                    <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 text-sm">
-                      <td className="p-4 font-bold text-slate-700">{n.cargo}</td>
-                      <td className="p-4 text-right text-slate-600">{formatCOP(n.valorDia)}</td>
-                      <td className="p-4 text-right font-bold text-slate-800">{formatCOP(n.valorDia * n.dias)}</td>
-                    </tr>
-                  ))}
-                  <tr className="bg-blue-50/50">
-                    <td className="p-4 font-bold text-blue-900 text-sm">TOTAL NÓMINA</td>
-                    <td className="p-4 font-bold text-right text-blue-700">{formatCOP(totalNominaDiaria)} / Día</td>
-                    <td className="p-4 font-black text-right text-blue-800">{formatCOP(totalNominaViaje)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-            <div className="p-5 border-b border-slate-100 bg-slate-50">
-              <h3 className="text-lg font-bold text-slate-800 flex items-center"><Receipt size={18} className="mr-2 text-slate-500"/> Historial de Liquidaciones</h3>
-            </div>
-            <div className="p-5 space-y-3 flex-1 overflow-y-auto max-h-[400px]">
-              {pagosNomina.map((p) => (
-                <div key={p.id} className="flex justify-between items-center p-4 border border-slate-100 rounded-xl hover:bg-slate-50 transition">
-                  <div className="flex items-center">
-                    <div className="bg-green-100 p-2 rounded-lg text-green-600 mr-4">
-                      <CheckCircle size={20}/>
-                    </div>
-                    <div>
-                      <p className="font-bold text-slate-800">{p.viaje}</p>
-                      <p className="text-xs text-slate-500">Aprobado el {p.fecha}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-black text-slate-800">{formatCOP(p.valor)}</p>
-                    <p className="text-[10px] font-bold text-green-600 uppercase mt-1">{p.estado}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {isAddNominaOpen && (
-          <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white w-full max-w-sm sm:rounded-2xl rounded-t-2xl p-6 animate-slide-up sm:animate-fade-in">
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="font-bold text-xl text-slate-800">Liquidar Viaje</h3>
-                <button onClick={() => setIsAddNominaOpen(false)} className="p-1 hover:bg-slate-100 rounded-full"><X size={20}/></button>
-              </div>
-              <form onSubmit={handleAddPagoNomina} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Fecha de Pago</label>
-                  <input type="date" required value={nuevoPagoNomina.fecha} onChange={e => setNuevoPagoNomina({...nuevoPagoNomina, fecha: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500"/>
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-500 mb-1">Viaje Referencia</label>
-                  <select required value={nuevoPagoNomina.viaje} onChange={e => setNuevoPagoNomina({...nuevoPagoNomina, viaje: e.target.value})} className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:border-blue-500 bg-white">
-                    <option value="" disabled>Seleccione un viaje</option>
-                    {viajes.map(v => <option key={v.id} value={v.viaje}>{v.viaje} ({v.fecha})</option>)}
-                  </select>
-                </div>
-                <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-center mt-4">
-                  <p className="text-xs font-bold text-blue-800 mb-1 uppercase">Total a Liquidar (Estándar)</p>
-                  <p className="text-2xl font-black text-blue-600">{formatCOP(totalNominaViaje)}</p>
-                </div>
-                <button type="submit" className="w-full bg-slate-900 text-white font-bold py-3 rounded-xl mt-4 hover:bg-slate-800 transition">
-                  Confirmar Liquidación
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  return (
-    <div className="flex flex-col h-screen bg-slate-50 font-sans overflow-hidden">
-      
-      <ModalViaje />
-      <ModalCliente />
-
-      {/* Top Header - Fijo */}
-      <header className="bg-white border-b border-slate-200 p-4 flex justify-between items-center shrink-0 z-10 shadow-sm print:hidden">
-        <h1 className="text-lg md:text-xl font-black text-slate-800 flex items-center truncate">
-          <Anchor className="mr-2 text-blue-600 shrink-0" size={22} /> 
-          <span className="truncate">Don Sebe ERP</span>
-        </h1>
-        <div className="flex items-center text-sm shrink-0 ml-2">
-           <div className="bg-slate-900 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow">
-             Modo Admin
-           </div>
-        </div>
-      </header>
-
-      {/* Main Content Area */}
-      <main className="flex-1 overflow-y-auto p-4 md:p-6 pb-6 print:p-0">
-        <div className="max-w-6xl mx-auto">
-          {activeTab === 'dashboard' && renderDashboard()}
-          {activeTab === 'documentos' && renderDocumentos()}
-          {activeTab === 'viajes' && renderViajes()}
-          {activeTab === 'clientes' && renderClientes()}
-          {activeTab === 'cartera' && renderCartera()}
-          {activeTab === 'nomina' && renderNomina()}
-          {activeTab === 'finanzas' && renderNIIF()}
-          {activeTab === 'sociedad' && renderSociedad()}
-        </div>
-      </main>
-
-      {/* Bottom Navigation Menu (Abajo) */}
-      <nav className="bg-white border-t border-slate-200 shrink-0 pb-safe z-40 print:hidden">
-        <div className="max-w-6xl mx-auto flex justify-between sm:justify-around overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = activeTab === item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`flex flex-col items-center justify-center p-3 min-w-[4.5rem] md:min-w-[5.5rem] transition-colors relative ${
-                  isActive 
-                  ? 'text-blue-600' 
-                  : 'text-slate-400 hover:text-slate-800 hover:bg-slate-50'
-                }`}
-              >
-                <Icon size={20} className={`mb-1 transition-transform ${isActive ? 'scale-110' : ''}`} />
-                <span className={`text-[10px] md:text-xs font-medium whitespace-nowrap ${isActive ? 'font-bold' : ''}`}>
-                  {item.label}
-                </span>
-                {isActive && (
-                  <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-8 h-1 bg-blue-600 rounded-b-full"></div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
-      
-    </div>
-  );
-}
+// Inicialización del Sistema
+window.onload = () => {
+    App.render();
+};
+
+</script>
+</body>
+</html>
