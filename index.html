@@ -5,9 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Don Sebe ERP - Sistema Operativo Completo</title>
     <link rel="manifest" href="manifest.json">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="apple-touch-icon" href="icono.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="icono.png">
+    
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Chart.js para NIIF/Dashboard -->
@@ -15,23 +16,30 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <style><>
+    <style>
         /* Animaciones base y utilidades nativas */
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        
         .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
-        .animate-slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        .animate-slide-up { animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        .animate-scale-in { animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
         
         /* Ocultar scrollbars manteniendo funcionalidad */
         .hide-scroll::-webkit-scrollbar { display: none; }
         .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        /* Desplazamiento suave para tablas en móviles */
+        .table-scroll { -webkit-overflow-scrolling: touch; }
     </style>
 </head>
 <body class="flex flex-col h-screen bg-slate-50 font-sans overflow-hidden text-slate-800">
 
     <!-- Contenedor Dinámico Principal -->
-    <div id="app-root" class="flex flex-col h-full w-full"></div>
+    <div id="app-root" class="flex flex-col h-full w-full relative"></div>
 
 <script>
 /**
@@ -54,6 +62,7 @@ const App = {
         isUploading: false,
         uploadSuccess: false,
 
+        // Modal States
         selectedViaje: null,
         selectedCliente: null,
         isAddViajeOpen: false,
@@ -123,16 +132,19 @@ const App = {
     navItems: [
         { id: 'dashboard', label: 'Inicio', icon: 'trending-up' },
         { id: 'viajes', label: 'Viajes', icon: 'ship' },
-        { id: 'cartera', label: 'Cartera', icon: 'wallet' },
-        { id: 'documentos', label: 'Archivos', icon: 'file-scan' },
-        { id: 'nomina', label: 'Nómina', icon: 'users' },
-        { id: 'clientes', label: 'Clientes', icon: 'contact' },
         { id: 'finanzas', label: 'NIIF', icon: 'landmark' },
-        { id: 'sociedad', label: 'Sociedad', icon: 'anchor' }
+        { id: 'cartera', label: 'Cartera', icon: 'wallet' },
+        { id: 'nomina', label: 'Nómina', icon: 'users' },
+        { id: 'sociedad', label: 'Sociedad', icon: 'anchor' },
+        { id: 'clientes', label: 'Clientes', icon: 'contact' },
+        { id: 'documentos', label: 'Archivos', icon: 'file-scan' }
     ],
 
     // Métodos de Mutación (Acciones)
-    setTab: (tab) => { App.state.activeTab = tab; App.render(); },
+    setTab: (tab) => { 
+        App.state.activeTab = tab; 
+        App.render(); 
+    },
     setNiifTab: (tab) => { App.state.niifTab = tab; App.render(); },
     setDocTab: (tab) => { App.state.docTab = tab; App.render(); },
     setFilterVal: (key, val) => { App.state[key] = val; App.render(); },
@@ -155,7 +167,7 @@ const App = {
         const gastoTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.gastos), 0);
         const utilidadBruta = s.viajes.reduce((acc, curr) => acc + Number(curr.utilidadBruta), 0);
         const carteraTotal = s.carteraClientes.filter(c => c.estado === 'Pendiente').reduce((acc, curr) => acc + Number(curr.valorTotal), 0);
-        const utilidadNeta = ingresoTotal - gastoTotal; // Utilidad generada total
+        const utilidadNeta = ingresoTotal - gastoTotal; 
         const ingresoRecaudado = ingresoTotal - carteraTotal;
         const inversionTotal = s.socios.reduce((acc, curr) => acc + curr.inversion, 0);
         return { ingresoTotal, gastoTotal, utilidadBruta, carteraTotal, utilidadNeta, ingresoRecaudado, inversionTotal };
@@ -219,39 +231,55 @@ const App = {
                 <p class="text-sm text-slate-500">M/N Greicy Jireth - KPIs consolidados en Tiempo Real</p>
             </div>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Ingresos Brutos</p><div class="p-1.5 bg-blue-50 rounded-lg text-blue-600"><i data-lucide="trending-up" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.ingresoTotal)}</h3></div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Costos Operativos</p><div class="p-1.5 bg-red-50 rounded-lg text-red-600"><i data-lucide="file-spreadsheet" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.gastoTotal)}</h3></div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Utilidad Bruta</p><div class="p-1.5 bg-green-50 rounded-lg text-green-600"><i data-lucide="line-chart" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.utilidadBruta)}</h3></div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Cartera Activa</p><div class="p-1.5 bg-orange-50 rounded-lg text-orange-600"><i data-lucide="alert-circle" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.carteraTotal)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Ingresos Brutos</p><div class="p-1.5 bg-blue-50 rounded-lg text-blue-600"><i data-lucide="trending-up" class="w-4 h-4"></i></div></div><h3 class="text-lg sm:text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.ingresoTotal)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Costos</p><div class="p-1.5 bg-red-50 rounded-lg text-red-600"><i data-lucide="file-spreadsheet" class="w-4 h-4"></i></div></div><h3 class="text-lg sm:text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.gastoTotal)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Util. Bruta</p><div class="p-1.5 bg-green-50 rounded-lg text-green-600"><i data-lucide="line-chart" class="w-4 h-4"></i></div></div><h3 class="text-lg sm:text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.utilidadBruta)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Cartera</p><div class="p-1.5 bg-orange-50 rounded-lg text-orange-600"><i data-lucide="alert-circle" class="w-4 h-4"></i></div></div><h3 class="text-lg sm:text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.carteraTotal)}</h3></div>
             </div>
             
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="lg:col-span-2 bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-[400px] flex flex-col">
+                <!-- Gráfica optimizada para móvil (menor altura) -->
+                <div class="lg:col-span-2 bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 h-[300px] lg:h-[400px] flex flex-col">
                     <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-sm font-bold text-slate-800 flex items-center"><i data-lucide="bar-chart-2" class="mr-2 text-blue-600 w-4 h-4"></i> Tendencia Financiera (Monto en Millones)</h3>
+                        <h3 class="text-sm font-bold text-slate-800 flex items-center"><i data-lucide="bar-chart-2" class="mr-2 text-blue-600 w-4 h-4"></i> Tendencia Financiera (M)</h3>
                     </div>
                     <div class="flex-1 min-h-0 relative"><canvas id="lineChart"></canvas></div>
                 </div>
                 
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-[400px] flex flex-col">
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 min-h-[300px] lg:h-[400px] flex flex-col">
                     <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center"><i data-lucide="activity" class="mr-2 text-green-500 w-4 h-4"></i> Eficiencia y Rendimiento</h3>
-                    <div class="flex-1 flex flex-col justify-around">
+                    <div class="flex-1 flex flex-col justify-around gap-4 sm:gap-0">
                         <div class="group">
                             <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Margen Operativo</span><span class="text-sm font-black text-slate-800">${margenOperativo}%</span></div>
                             <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1"><div class="bg-blue-500 h-2.5 rounded-full" style="width: ${Math.min(margenOperativo, 100)}%"></div></div>
-                            <p class="text-[10px] text-slate-400 opacity-80 group-hover:opacity-100 transition-opacity">Mide la rentabilidad directa: cuánto del ingreso se convierte en utilidad neta tras descontar los gastos de operación del viaje.</p>
+                            <p class="text-[10px] text-slate-400 opacity-80 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">Convierte ingreso en utilidad neta tras descontar gastos.</p>
                         </div>
                         <div class="group">
                             <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Eficiencia Recaudo</span><span class="text-sm font-black text-slate-800">${eficienciaRecaudo}%</span></div>
                             <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1"><div class="bg-green-500 h-2.5 rounded-full" style="width: ${Math.min(eficienciaRecaudo, 100)}%"></div></div>
-                            <p class="text-[10px] text-slate-400 opacity-80 group-hover:opacity-100 transition-opacity">Indica qué porcentaje del ingreso facturado ya ha sido cobrado e ingresado en caja (libre de cartera pendiente).</p>
+                            <p class="text-[10px] text-slate-400 opacity-80 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">Porcentaje del ingreso facturado ya ingresado en caja.</p>
                         </div>
                         <div class="group">
-                            <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Retorno de Inversión (ROI)</span><span class="text-sm font-black text-slate-800">${roi}%</span></div>
+                            <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Retorno (ROI)</span><span class="text-sm font-black text-slate-800">${roi}%</span></div>
                             <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1"><div class="bg-indigo-500 h-2.5 rounded-full" style="width: ${Math.min(roi, 100)}%"></div></div>
-                            <p class="text-[10px] text-slate-400 opacity-80 group-hover:opacity-100 transition-opacity">Evalúa la eficiencia de la inversión global mostrando la relación entre la utilidad generada y el capital aportado por los socios.</p>
+                            <p class="text-[10px] text-slate-400 opacity-80 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">Relación entre utilidad generada y capital aportado.</p>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- NUEVO: Menú de Módulos integrado en el Dashboard -->
+            <div class="mt-8 bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100">
+                <h3 class="text-lg font-bold text-slate-800 mb-5 flex items-center"><i data-lucide="layout-grid" class="mr-2 text-blue-600 w-5 h-5"></i> Módulos del Sistema</h3>
+                <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
+                    ${App.navItems.filter(item => item.id !== 'dashboard').map(item => `
+                        <button onclick="App.setTab('${item.id}')" class="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-blue-50 hover:border-blue-200 hover:shadow-md transition-all group">
+                            <div class="bg-white p-3 rounded-full mb-3 shadow-sm group-hover:text-blue-600 transition-colors">
+                                <i data-lucide="${item.icon}" class="w-6 h-6 text-slate-600 group-hover:text-blue-600 transition-colors"></i>
+                            </div>
+                            <span class="text-[10px] sm:text-xs font-bold text-slate-700 text-center">${item.label}</span>
+                        </button>
+                    `).join('')}
                 </div>
             </div>
         </div>`;
@@ -259,23 +287,24 @@ const App = {
 
     renderViajes: () => `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
+            <!-- Header responsivo (flex-col en móviles pequeños) -->
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
                 <div><h2 class="text-2xl font-bold">Gestión de Viajes</h2><p class="text-sm text-slate-500">Historial y cruce operativo</p></div>
-                <button onclick="App.state.isAddViajeOpen=true; App.render()" class="bg-blue-600 text-white px-4 py-2.5 rounded-xl shadow-sm font-bold hover:bg-blue-700 flex items-center"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Nuevo Viaje</button>
+                <button onclick="App.state.isAddViajeOpen=true; App.render()" class="w-full sm:w-auto bg-blue-600 text-white px-4 py-3 sm:py-2.5 rounded-xl shadow-sm font-bold hover:bg-blue-700 flex justify-center items-center transition-colors"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Nuevo Viaje</button>
             </div>
             <div class="grid gap-3">
                 ${[...App.state.viajes].reverse().map(v => `
-                <div onclick="App.openModalViaje(${v.id})" class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center cursor-pointer hover:border-blue-300 transition-colors">
+                <div onclick="App.openModalViaje(${v.id})" class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col sm:flex-row sm:justify-between sm:items-center cursor-pointer hover:border-blue-300 transition-colors gap-4 sm:gap-0">
                     <div class="flex items-center">
-                        <div class="bg-slate-100 p-3 rounded-lg mr-4"><i data-lucide="map" class="w-5 h-5 text-slate-600"></i></div>
+                        <div class="bg-slate-100 p-3 rounded-lg mr-4 shrink-0"><i data-lucide="map" class="w-5 h-5 text-slate-600"></i></div>
                         <div>
-                            <h4 class="font-bold text-slate-800">${v.viaje} <span class="text-xs text-slate-400 font-normal ml-2">${v.fecha} • ${v.periodo}</span></h4>
-                            <p class="text-sm text-slate-500">${v.ruta}</p>
+                            <h4 class="font-bold text-slate-800 flex flex-wrap items-center">${v.viaje} <span class="text-[10px] sm:text-xs text-slate-400 font-normal sm:ml-2 w-full sm:w-auto mt-1 sm:mt-0">${v.fecha} • ${v.periodo}</span></h4>
+                            <p class="text-sm text-slate-500 mt-1 sm:mt-0">${v.ruta}</p>
                         </div>
                     </div>
-                    <div class="flex space-x-6 text-right">
-                        <div class="hidden sm:block"><p class="text-[10px] uppercase font-bold text-slate-400">Ingreso Recaudado</p><p class="font-bold text-slate-700">${formatCOP(v.ingresoRecaudado)}</p></div>
-                        <div><p class="text-[10px] uppercase font-bold text-slate-400">Utilidad Bruta</p><p class="font-black text-green-600">${formatCOP(v.utilidadBruta)}</p></div>
+                    <div class="flex sm:space-x-6 justify-between sm:justify-end border-t sm:border-0 pt-3 sm:pt-0 mt-2 sm:mt-0">
+                        <div class="text-left sm:text-right"><p class="text-[10px] uppercase font-bold text-slate-400">Ingreso Recaudado</p><p class="font-bold text-slate-700">${formatCOP(v.ingresoRecaudado)}</p></div>
+                        <div class="text-right"><p class="text-[10px] uppercase font-bold text-slate-400">Utilidad Bruta</p><p class="font-black text-green-600">${formatCOP(v.utilidadBruta)}</p></div>
                     </div>
                 </div>`).join('')}
             </div>
@@ -288,15 +317,15 @@ const App = {
 
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
                 <div><h2 class="text-2xl font-bold">Cartera de Clientes</h2><p class="text-sm text-slate-500">Deudas consolidadas y cotejadas</p></div>
-                <div class="bg-orange-100 text-orange-800 px-4 py-2.5 rounded-xl font-black border border-orange-200 shadow-sm">Total Exigible: ${formatCOP(App.getTotales().carteraTotal)}</div>
+                <div class="bg-orange-100 text-orange-800 px-4 py-2.5 rounded-xl font-black border border-orange-200 shadow-sm w-full sm:w-auto text-center">Exigible: ${formatCOP(App.getTotales().carteraTotal)}</div>
             </div>
 
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse min-w-[700px]">
-                        <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Cliente</th><th class="p-4">Concepto General</th><th class="p-4">Estado</th><th class="p-4 text-right">Total Adeudado</th></tr></thead>
+                <div class="w-full overflow-x-auto table-scroll">
+                    <table class="w-full text-left border-collapse min-w-[600px]">
+                        <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4 whitespace-nowrap">Cliente</th><th class="p-4">Concepto General</th><th class="p-4">Estado</th><th class="p-4 text-right whitespace-nowrap">Total Adeudado</th></tr></thead>
                         <tbody>
                             ${s.carteraClientes.map(c => `
                             <tr onclick="App.openModalCliente('${c.cliente}')" class="border-b hover:bg-slate-50 cursor-pointer transition-colors">
@@ -310,23 +339,25 @@ const App = {
             </div>
 
             <div class="mt-8">
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold flex items-center"><i data-lucide="ship" class="mr-2 text-slate-400 w-5 h-5"></i> Desglose Cotejado por Viaje</h3>
-                    <select onchange="App.setFilterVal('carteraViajeFiltro', this.value)" class="border rounded-lg p-2 text-sm bg-white shadow-sm font-medium focus:ring focus:ring-blue-200">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-3 sm:gap-0">
+                    <h3 class="text-lg font-bold flex items-center"><i data-lucide="ship" class="mr-2 text-slate-400 w-5 h-5"></i> Desglose por Viaje</h3>
+                    <select onchange="App.setFilterVal('carteraViajeFiltro', this.value)" class="w-full sm:w-auto border rounded-lg p-2 text-sm bg-white shadow-sm font-medium focus:ring focus:ring-blue-200 outline-none">
                         <option value="Todos" ${s.carteraViajeFiltro === 'Todos'?'selected':''}>Ver Todos los Viajes</option>
                         ${s.viajes.map(v => `<option value="${v.viaje}" ${s.carteraViajeFiltro === v.viaje?'selected':''}>${v.viaje} (${v.periodo})</option>`).join('')}
                     </select>
                 </div>
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                    <table class="w-full text-left border-collapse min-w-[600px]">
-                        <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Viaje</th><th class="p-4">Cliente</th><th class="p-4">Concepto</th><th class="p-4 text-right">Monto</th></tr></thead>
-                        <tbody>
-                            ${cv.length ? cv.map(c => `
-                            <tr class="border-b hover:bg-slate-50"><td class="p-4 text-sm font-bold text-slate-700">${c.viaje}</td><td class="p-4 text-sm font-medium">${c.cliente}</td><td class="p-4 text-sm text-slate-500">${c.concepto}</td><td class="p-4 text-right font-bold text-orange-600">${formatCOP(c.valor)}</td></tr>`).join('') 
-                            : '<tr><td colspan="4" class="p-8 text-center text-slate-500">No hay deudas registradas para este filtro.</td></tr>'}
-                            ${cv.length ? `<tr class="bg-orange-50"><td colspan="3" class="p-4 text-right font-bold text-orange-900 text-sm uppercase">Total Filtro:</td><td class="p-4 text-right font-black text-orange-700 text-lg">${formatCOP(totalFiltro)}</td></tr>` : ''}
-                        </tbody>
-                    </table>
+                    <div class="w-full overflow-x-auto table-scroll">
+                        <table class="w-full text-left border-collapse min-w-[550px]">
+                            <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Viaje</th><th class="p-4">Cliente</th><th class="p-4">Concepto</th><th class="p-4 text-right">Monto</th></tr></thead>
+                            <tbody>
+                                ${cv.length ? cv.map(c => `
+                                <tr class="border-b hover:bg-slate-50"><td class="p-4 text-sm font-bold text-slate-700 whitespace-nowrap">${c.viaje}</td><td class="p-4 text-sm font-medium whitespace-nowrap">${c.cliente}</td><td class="p-4 text-sm text-slate-500">${c.concepto}</td><td class="p-4 text-right font-bold text-orange-600 whitespace-nowrap">${formatCOP(c.valor)}</td></tr>`).join('') 
+                                : '<tr><td colspan="4" class="p-8 text-center text-slate-500">No hay deudas registradas para este filtro.</td></tr>'}
+                                ${cv.length ? `<tr class="bg-orange-50"><td colspan="3" class="p-4 text-right font-bold text-orange-900 text-sm uppercase">Total Filtro:</td><td class="p-4 text-right font-black text-orange-700 text-lg whitespace-nowrap">${formatCOP(totalFiltro)}</td></tr>` : ''}
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -338,20 +369,20 @@ const App = {
 
         if(s.docTab === 'escaner') {
             content = `
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-10 text-center print:hidden">
-                    <h3 class="font-bold text-xl mb-2">Carga Inteligente de Documentos</h3>
-                    <p class="text-sm text-slate-500 mb-8">Sube archivos PDF o fotos de facturas para extraer datos.</p>
-                    <div class="border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-2xl p-10 flex flex-col items-center cursor-pointer hover:bg-blue-50 transition-colors">
-                        <i data-lucide="file-image" class="text-blue-400 w-12 h-12 mb-4"></i>
-                        <p class="font-bold text-lg text-slate-700">Arrastra tu PDF o Imagen aquí</p>
-                        <button onclick="App.handleMockUpload()" ${s.isUploading ? 'disabled':''} class="mt-4 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold disabled:bg-slate-400 shadow-sm">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 sm:p-10 text-center print:hidden">
+                    <h3 class="font-bold text-xl mb-2">Carga Inteligente</h3>
+                    <p class="text-sm text-slate-500 mb-6">Sube archivos PDF o fotos de facturas para extraer datos.</p>
+                    <div class="border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-2xl p-6 sm:p-10 flex flex-col items-center cursor-pointer hover:bg-blue-50 transition-colors">
+                        <i data-lucide="file-image" class="text-blue-400 w-10 h-10 mb-4"></i>
+                        <p class="font-bold text-base sm:text-lg text-slate-700">Toca o arrastra tu archivo</p>
+                        <button onclick="App.handleMockUpload()" ${s.isUploading ? 'disabled':''} class="mt-4 bg-blue-600 text-white w-full sm:w-auto px-6 py-3 rounded-xl font-bold disabled:bg-slate-400 shadow-sm transition-colors">
                             ${s.isUploading ? 'Procesando con IA...' : 'Seleccionar Archivo'}
                         </button>
                     </div>
                     ${s.uploadSuccess ? `
-                    <div class="mt-8 bg-green-50 border border-green-200 p-6 rounded-xl text-left animate-slide-up">
-                        <div class="flex items-center text-green-700 font-bold text-lg mb-4"><i data-lucide="check-circle" class="mr-2"></i> Documento Analizado Exitosamente</div>
-                        <div class="bg-white rounded-lg p-4 border border-green-100 grid grid-cols-2 gap-4 text-sm shadow-sm">
+                    <div class="mt-8 bg-green-50 border border-green-200 p-5 sm:p-6 rounded-xl text-left animate-slide-up">
+                        <div class="flex items-center text-green-700 font-bold text-base sm:text-lg mb-4"><i data-lucide="check-circle" class="mr-2"></i> Procesado Exitosamente</div>
+                        <div class="bg-white rounded-lg p-4 border border-green-100 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm shadow-sm">
                             <div><span class="font-bold text-slate-500 block">Concepto</span>Combustible (Acpm)</div>
                             <div><span class="font-bold text-slate-500 block">Fecha</span>15/12/2025</div>
                             <div><span class="font-bold text-slate-500 block">Proveedor</span>EDS XYZ</div>
@@ -365,23 +396,25 @@ const App = {
             const th3 = s.docTab === 'formato-ingresos' ? 'Concepto / Carga' : 'Concepto del Gasto';
             const th5 = s.docTab === 'formato-ingresos' ? 'Estado (P/D)' : 'Firma Recibido';
             content = `
-                <div class="bg-white border p-8 shadow-sm">
-                    <div class="text-center mb-6 border-b-2 border-slate-800 pb-4">
-                        <h1 class="text-2xl font-black uppercase">Transporte Marítimo Don Sebe</h1><h2 class="text-lg font-bold">M/N Greicy Jireth</h2><h3 class="text-base font-semibold mt-2">REPORTE MANUAL DE ${title}</h3>
+                <div class="bg-white border p-4 sm:p-8 shadow-sm overflow-x-auto table-scroll">
+                    <div class="min-w-[700px]">
+                        <div class="text-center mb-6 border-b-2 border-slate-800 pb-4">
+                            <h1 class="text-xl sm:text-2xl font-black uppercase">Transporte Marítimo Don Sebe</h1><h2 class="text-base sm:text-lg font-bold">M/N Greicy Jireth</h2><h3 class="text-sm sm:text-base font-semibold mt-2">REPORTE MANUAL DE ${title}</h3>
+                        </div>
+                        <div class="flex justify-between text-xs sm:text-sm font-bold mb-4"><div>Viaje N°: _________</div><div>Fecha: _________</div><div>Firma: _________</div></div>
+                        <table class="w-full text-left border-collapse border border-slate-800 text-xs sm:text-sm">
+                            <thead><tr class="bg-slate-100"><th class="border border-slate-800 p-2">Fecha</th><th class="border border-slate-800 p-2">${th2}</th><th class="border border-slate-800 p-2">${th3}</th><th class="border border-slate-800 p-2 text-right">Valor ($)</th><th class="border border-slate-800 p-2 text-center">${th5}</th></tr></thead>
+                            <tbody>${Array(15).fill('<tr><td class="border border-slate-800 p-3 sm:p-4"></td><td class="border border-slate-800 p-3 sm:p-4"></td><td class="border border-slate-800 p-3 sm:p-4"></td><td class="border border-slate-800 p-3 sm:p-4"></td><td class="border border-slate-800 p-3 sm:p-4"></td></tr>').join('')}</tbody>
+                        </table>
                     </div>
-                    <div class="flex justify-between text-sm font-bold mb-4"><div>Viaje N°: _________</div><div>Fecha: _________</div><div>Firma: _________</div></div>
-                    <table class="w-full text-left border-collapse border border-slate-800 text-sm">
-                        <thead><tr class="bg-slate-100"><th class="border border-slate-800 p-2">Fecha</th><th class="border border-slate-800 p-2">${th2}</th><th class="border border-slate-800 p-2">${th3}</th><th class="border border-slate-800 p-2 text-right">Valor ($)</th><th class="border border-slate-800 p-2 text-center">${th5}</th></tr></thead>
-                        <tbody>${Array(15).fill('<tr><td class="border border-slate-800 p-4"></td><td class="border border-slate-800 p-4"></td><td class="border border-slate-800 p-4"></td><td class="border border-slate-800 p-4"></td><td class="border border-slate-800 p-4"></td></tr>').join('')}</tbody>
-                    </table>
                 </div>`;
         }
 
         return `
         <div class="space-y-6 animate-fade-in">
-            <div class="flex justify-between items-center print:hidden">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center print:hidden gap-3 sm:gap-0">
                 <div><h2 class="text-2xl font-bold">Centro de Documentos</h2></div>
-                <button onclick="window.print()" class="bg-slate-900 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center shadow-sm hover:bg-slate-800"><i data-lucide="printer" class="w-4 h-4 mr-2"></i> Imprimir Reporte</button>
+                <button onclick="window.print()" class="w-full sm:w-auto bg-slate-900 text-white px-4 py-3 sm:py-2.5 rounded-xl font-semibold flex items-center justify-center shadow-sm hover:bg-slate-800 transition-colors"><i data-lucide="printer" class="w-4 h-4 mr-2"></i> Imprimir Reporte</button>
             </div>
             <div class="flex space-x-2 overflow-x-auto pb-2 print:hidden hide-scroll">
                 ${[{id:'escaner', label:'Escanear Múltiple', icon:'upload-cloud'},{id:'formato-ingresos', label:'Formato Ingresos', icon:'file-text'},{id:'formato-gastos', label:'Formato Gastos', icon:'file-text'}].map(t => `
@@ -396,27 +429,29 @@ const App = {
         const s = App.state;
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
                 <div><h2 class="text-2xl font-bold">Directorio de Clientes</h2></div>
-                <button onclick="App.state.isAddClienteOpen=true; App.render()" class="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center shadow-sm hover:bg-blue-700"><i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Cliente</button>
+                <button onclick="App.state.isAddClienteOpen=true; App.render()" class="w-full sm:w-auto bg-blue-600 text-white px-4 py-3 sm:py-2.5 rounded-xl font-bold flex justify-center items-center shadow-sm hover:bg-blue-700 transition-colors"><i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Cliente</button>
             </div>
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                <table class="w-full text-left border-collapse min-w-[800px]">
-                    <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Cliente</th><th class="p-4">Actividad</th><th class="p-4">Teléfono</th><th class="p-4">Ubicación</th><th class="p-4 text-right">Estado Cartera</th></tr></thead>
-                    <tbody>
-                        ${s.clientesDir.map(c => {
-                            const deuda = s.carteraClientes.find(car => car.cliente.includes(c.nombre));
-                            const tieneDeuda = deuda && deuda.estado === 'Pendiente';
-                            return `
-                            <tr class="border-b hover:bg-slate-50 cursor-pointer transition-colors" onclick="${tieneDeuda ? `App.openModalCliente('${deuda.cliente}')` : ''}">
-                                <td class="p-4 flex items-center"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mr-3">${c.nombre.charAt(0)}</div><span class="font-bold text-slate-800">${c.nombre}</span></td>
-                                <td class="p-4 text-sm text-slate-600"><span class="bg-slate-100 px-2 py-1 rounded-md text-xs border border-slate-200">${c.tipo}</span></td>
-                                <td class="p-4 text-sm font-medium">${c.telefono}</td><td class="p-4 text-sm">${c.ubicacion}</td>
-                                <td class="p-4 text-right"><div class="inline-block px-3 py-1 rounded-lg text-xs font-bold ${tieneDeuda ? 'bg-orange-50 text-orange-700 border-orange-200 border' : 'bg-green-50 text-green-700 border-green-200 border'}">${tieneDeuda ? formatCOP(deuda.valorTotal) : 'A Paz y Salvo'}</div></td>
-                            </tr>`
-                        }).join('')}
-                    </tbody>
-                </table>
+                <div class="w-full overflow-x-auto table-scroll">
+                    <table class="w-full text-left border-collapse min-w-[700px]">
+                        <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Cliente</th><th class="p-4">Actividad</th><th class="p-4">Teléfono</th><th class="p-4">Ubicación</th><th class="p-4 text-right">Estado Cartera</th></tr></thead>
+                        <tbody>
+                            ${s.clientesDir.map(c => {
+                                const deuda = s.carteraClientes.find(car => car.cliente.includes(c.nombre));
+                                const tieneDeuda = deuda && deuda.estado === 'Pendiente';
+                                return `
+                                <tr class="border-b hover:bg-slate-50 cursor-pointer transition-colors" onclick="${tieneDeuda ? `App.openModalCliente('${deuda.cliente}')` : ''}">
+                                    <td class="p-4 flex items-center whitespace-nowrap"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mr-3 shrink-0">${c.nombre.charAt(0)}</div><span class="font-bold text-slate-800">${c.nombre}</span></td>
+                                    <td class="p-4 text-sm text-slate-600 whitespace-nowrap"><span class="bg-slate-100 px-2 py-1 rounded-md text-xs border border-slate-200">${c.tipo}</span></td>
+                                    <td class="p-4 text-sm font-medium whitespace-nowrap">${c.telefono}</td><td class="p-4 text-sm whitespace-nowrap">${c.ubicacion}</td>
+                                    <td class="p-4 text-right whitespace-nowrap"><div class="inline-block px-3 py-1 rounded-lg text-xs font-bold ${tieneDeuda ? 'bg-orange-50 text-orange-700 border-orange-200 border' : 'bg-green-50 text-green-700 border-green-200 border'}">${tieneDeuda ? formatCOP(deuda.valorTotal) : 'A Paz y Salvo'}</div></td>
+                                </tr>`
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>`;
     },
@@ -428,28 +463,30 @@ const App = {
 
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
                 <div><h2 class="text-2xl font-bold">Gestión de Nómina</h2></div>
-                <button onclick="App.state.isAddNominaOpen=true; App.render()" class="bg-slate-900 text-white px-4 py-2.5 rounded-xl font-bold flex items-center shadow-sm hover:bg-slate-800"><i data-lucide="badge-dollar-sign" class="w-4 h-4 mr-2"></i> Liquidar Nómina</button>
+                <button onclick="App.state.isAddNominaOpen=true; App.render()" class="w-full sm:w-auto bg-slate-900 text-white px-4 py-3 sm:py-2.5 rounded-xl font-bold flex justify-center items-center shadow-sm hover:bg-slate-800 transition-colors"><i data-lucide="badge-dollar-sign" class="w-4 h-4 mr-2"></i> Liquidar Nómina</button>
             </div>
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                    <div class="p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800"><i data-lucide="users" class="mr-2 text-blue-500 w-5 h-5"></i> Tarifas de Tripulación (Actualizadas 2026)</h3></div>
-                    <table class="w-full text-left border-collapse">
-                        <thead><tr class="text-slate-500 text-xs uppercase border-b bg-white"><th class="p-4">Cargo</th><th class="p-4 text-right">Tarifa Día</th><th class="p-4 text-right">Ref. Viaje (5D)</th></tr></thead>
-                        <tbody>
-                            ${s.nomina.map(n => `<tr class="border-b text-sm hover:bg-slate-50"><td class="p-4 font-bold text-slate-700">${n.cargo}</td><td class="p-4 text-right text-slate-600">${formatCOP(n.valorDia)}</td><td class="p-4 text-right font-bold">${formatCOP(n.valorDia * n.dias)}</td></tr>`).join('')}
-                            <tr class="bg-blue-50/50"><td class="p-4 font-black text-blue-900 text-sm">TOTAL NÓMINA</td><td class="p-4 font-bold text-right text-blue-700">${formatCOP(totalDiaria)} / Día</td><td class="p-4 font-black text-right text-blue-800 text-lg">${formatCOP(totalViaje)}</td></tr>
-                        </tbody>
-                    </table>
+                    <div class="p-4 sm:p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800 text-sm sm:text-base"><i data-lucide="users" class="mr-2 text-blue-500 w-5 h-5"></i> Tarifas de Tripulación (Actualizadas 2026)</h3></div>
+                    <div class="w-full overflow-x-auto table-scroll">
+                        <table class="w-full text-left border-collapse min-w-[400px]">
+                            <thead><tr class="text-slate-500 text-[10px] sm:text-xs uppercase border-b bg-white"><th class="p-3 sm:p-4">Cargo</th><th class="p-3 sm:p-4 text-right">Tarifa Día</th><th class="p-3 sm:p-4 text-right">Ref. Viaje (5D)</th></tr></thead>
+                            <tbody>
+                                ${s.nomina.map(n => `<tr class="border-b text-xs sm:text-sm hover:bg-slate-50"><td class="p-3 sm:p-4 font-bold text-slate-700 whitespace-nowrap">${n.cargo}</td><td class="p-3 sm:p-4 text-right text-slate-600 whitespace-nowrap">${formatCOP(n.valorDia)}</td><td class="p-3 sm:p-4 text-right font-bold whitespace-nowrap">${formatCOP(n.valorDia * n.dias)}</td></tr>`).join('')}
+                                <tr class="bg-blue-50/50"><td class="p-3 sm:p-4 font-black text-blue-900 text-xs sm:text-sm whitespace-nowrap">TOTAL NÓMINA</td><td class="p-3 sm:p-4 font-bold text-right text-blue-700 text-xs sm:text-sm whitespace-nowrap">${formatCOP(totalDiaria)} / Día</td><td class="p-3 sm:p-4 font-black text-right text-blue-800 text-base sm:text-lg whitespace-nowrap">${formatCOP(totalViaje)}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-                    <div class="p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800"><i data-lucide="receipt" class="mr-2 text-green-500 w-5 h-5"></i> Historial de Liquidaciones</h3></div>
-                    <div class="p-5 space-y-3 overflow-y-auto max-h-[400px]">
+                    <div class="p-4 sm:p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800 text-sm sm:text-base"><i data-lucide="receipt" class="mr-2 text-green-500 w-5 h-5"></i> Historial de Liquidaciones</h3></div>
+                    <div class="p-4 sm:p-5 space-y-3 overflow-y-auto max-h-[400px]">
                         ${s.pagosNomina.map(p => `
-                            <div class="flex justify-between items-center p-4 border rounded-xl hover:border-green-200 transition-colors">
-                                <div class="flex items-center"><div class="bg-green-100 p-2 rounded-lg text-green-600 mr-4"><i data-lucide="check-circle" class="w-5 h-5"></i></div><div><p class="font-bold text-slate-800">${p.viaje}</p><p class="text-xs text-slate-500 font-medium">Aprobado el ${p.fecha}</p></div></div>
-                                <div class="text-right"><p class="font-black text-slate-800">${formatCOP(p.valor)}</p><p class="text-[10px] font-bold text-green-600 uppercase mt-1 bg-green-50 inline-block px-2 py-0.5 rounded">${p.estado}</p></div>
+                            <div class="flex justify-between items-center p-3 sm:p-4 border rounded-xl hover:border-green-200 transition-colors">
+                                <div class="flex items-center"><div class="bg-green-100 p-2 rounded-lg text-green-600 mr-3 sm:mr-4 shrink-0"><i data-lucide="check-circle" class="w-4 h-4 sm:w-5 sm:h-5"></i></div><div><p class="font-bold text-sm sm:text-base text-slate-800">${p.viaje}</p><p class="text-[10px] sm:text-xs text-slate-500 font-medium">Aprobado ${p.fecha}</p></div></div>
+                                <div class="text-right"><p class="font-black text-sm sm:text-base text-slate-800">${formatCOP(p.valor)}</p><p class="text-[9px] sm:text-[10px] font-bold text-green-600 uppercase mt-1 bg-green-50 inline-block px-2 py-0.5 rounded">${p.estado}</p></div>
                             </div>
                         `).join('')}
                     </div>
@@ -466,95 +503,95 @@ const App = {
             content = `
             <div class="space-y-8 print:space-y-6">
                 <div class="text-center border-b-2 border-slate-800 pb-4 mb-6">
-                    <h1 class="text-xl md:text-2xl font-black uppercase text-slate-900">Informe de Gestión Operativa y Financiera Consolidado</h1>
-                    <h2 class="text-lg font-bold text-slate-700">Empresa: Transporte Marítimo y Fluvial Don Sebe - M/N Greicy Jireth</h2>
-                    <p class="text-sm font-semibold text-slate-500 mt-2">Cruce de Datos: Ingresos vs Cartera vs Utilidad Real</p>
+                    <h1 class="text-lg sm:text-xl md:text-2xl font-black uppercase text-slate-900">Informe de Gestión Operativa y Financiera Consolidado</h1>
+                    <h2 class="text-sm sm:text-lg font-bold text-slate-700 mt-1">Empresa: Don Sebe - M/N Greicy Jireth</h2>
+                    <p class="text-xs sm:text-sm font-semibold text-slate-500 mt-2">Cruce de Datos: Ingresos vs Cartera vs Utilidad Real</p>
                 </div>
 
                 <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
-                    <div class="bg-slate-800 text-white p-3 font-bold text-sm uppercase">1. Comparativo de Ingresos y Utilidades (Agrupado por Periodo)</div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-left text-sm border-collapse min-w-[700px]">
+                    <div class="bg-slate-800 text-white p-3 font-bold text-xs sm:text-sm uppercase">1. Comparativo de Ingresos y Utilidades</div>
+                    <div class="w-full overflow-x-auto table-scroll">
+                        <table class="w-full text-left text-xs sm:text-sm border-collapse min-w-[700px]">
                             <thead>
                                 <tr class="bg-slate-100 text-slate-600 border-b">
-                                    <th class="p-3 font-bold border-r">Periodo / Mes</th>
-                                    <th class="p-3 font-bold text-right border-r">Ingreso Proyectado</th>
-                                    <th class="p-3 font-bold text-right border-r">Ingreso Real</th>
-                                    <th class="p-3 font-bold text-right border-r">Utilidad Proyectada</th>
-                                    <th class="p-3 font-bold text-right text-green-700 border-r">Utilidad Real</th>
-                                    <th class="p-3 font-bold text-right text-orange-600">Cartera Acumulada</th>
+                                    <th class="p-3 font-bold border-r whitespace-nowrap">Periodo / Mes</th>
+                                    <th class="p-3 font-bold text-right border-r whitespace-nowrap">Ingreso Proy.</th>
+                                    <th class="p-3 font-bold text-right border-r whitespace-nowrap">Ingreso Real</th>
+                                    <th class="p-3 font-bold text-right border-r whitespace-nowrap">Util. Proy.</th>
+                                    <th class="p-3 font-bold text-right text-green-700 border-r whitespace-nowrap">Util. Real</th>
+                                    <th class="p-3 font-bold text-right text-orange-600 whitespace-nowrap">Cartera Acum.</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr class="bg-blue-50/50 border-b font-black text-slate-800">
-                                    <td class="p-3 border-r">PERIODO 1 (Total)</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(296561210)}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(186146710)}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(112209000)}</td>
-                                    <td class="p-3 text-right text-green-700 border-r">${formatCOP(88714000)}</td>
-                                    <td class="p-3 text-right text-orange-600">${formatCOP(110414500)}</td>
+                                    <td class="p-3 border-r whitespace-nowrap">PERIODO 1 (Total)</td>
+                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(296561210)}</td>
+                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(186146710)}</td>
+                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(112209000)}</td>
+                                    <td class="p-3 text-right text-green-700 border-r whitespace-nowrap">${formatCOP(88714000)}</td>
+                                    <td class="p-3 text-right text-orange-600 whitespace-nowrap">${formatCOP(110414500)}</td>
                                 </tr>
                                 ${s.informePeriodos.map(p => `
                                 <tr class="border-b hover:bg-slate-50">
-                                    <td class="p-3 border-r font-medium">${p.periodo}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(p.ingresoProy)}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(p.ingresoReal)}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(p.utilProy)}</td>
-                                    <td class="p-3 text-right font-bold text-green-700 border-r">${formatCOP(p.utilReal)}</td>
-                                    <td class="p-3 text-right font-bold text-orange-600">${formatCOP(p.cartera)}</td>
+                                    <td class="p-3 border-r font-medium whitespace-nowrap">${p.periodo}</td>
+                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(p.ingresoProy)}</td>
+                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(p.ingresoReal)}</td>
+                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(p.utilProy)}</td>
+                                    <td class="p-3 text-right font-bold text-green-700 border-r whitespace-nowrap">${formatCOP(p.utilReal)}</td>
+                                    <td class="p-3 text-right font-bold text-orange-600 whitespace-nowrap">${formatCOP(p.cartera)}</td>
                                 </tr>`).join('')}
                             </tbody>
                         </table>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-                    <div class="bg-red-50 border border-red-100 rounded-xl p-5 shadow-sm">
-                        <h3 class="font-black text-red-800 mb-3 flex items-center"><i data-lucide="alert-triangle" class="w-5 h-5 mr-2"></i> Estado de Cartera</h3>
-                        <p class="text-sm text-red-900 mb-2">El <strong>89.5%</strong> de la deuda se originó en el Periodo 1. La cartera se concentra principalmente en tres clientes clave:</p>
-                        <ul class="list-disc list-inside text-sm font-bold text-red-800 ml-2 space-y-1">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mt-6">
+                    <div class="bg-red-50 border border-red-100 rounded-xl p-4 sm:p-5 shadow-sm">
+                        <h3 class="font-black text-red-800 mb-2 sm:mb-3 flex items-center text-sm sm:text-base"><i data-lucide="alert-triangle" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i> Estado de Cartera</h3>
+                        <p class="text-xs sm:text-sm text-red-900 mb-2">El <strong>89.5%</strong> de la deuda se originó en el Periodo 1. Principales clientes:</p>
+                        <ul class="list-disc list-inside text-xs sm:text-sm font-bold text-red-800 ml-1 sm:ml-2 space-y-1">
                             <li>Alex (${formatCOP(31400000)})</li>
-                            <li>John Jairo Silva (${formatCOP(41300000)})</li>
+                            <li>John Jairo (${formatCOP(41300000)})</li>
                             <li>Oscar (${formatCOP(31704500)})</li>
                         </ul>
                     </div>
 
-                    <div class="bg-blue-50 border border-blue-100 rounded-xl p-5 shadow-sm">
-                        <h3 class="font-black text-blue-900 mb-3 flex items-center"><i data-lucide="info" class="w-5 h-5 mr-2"></i> Conclusión Socio 40% (PRI)</h3>
-                        <div class="space-y-2 text-sm text-blue-900">
+                    <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 sm:p-5 shadow-sm">
+                        <h3 class="font-black text-blue-900 mb-2 sm:mb-3 flex items-center text-sm sm:text-base"><i data-lucide="info" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i> Conclusión Socio 40% (PRI)</h3>
+                        <div class="space-y-2 text-xs sm:text-sm text-blue-900">
                             <div class="flex justify-between border-b border-blue-200 pb-1"><span>Utilidad a Favor:</span><span class="font-bold text-green-700">+ ${formatCOP(69689184)}</span></div>
-                            <div class="flex justify-between border-b border-blue-200 pb-1"><span>Deuda Mantenimiento:</span><span class="font-bold text-red-600">- ${formatCOP(81900472)}</span></div>
-                            <div class="flex justify-between pt-1 font-black text-base"><span>Saldo Resultante:</span><span class="text-red-700">${formatCOP(-12211288)}</span></div>
+                            <div class="flex justify-between border-b border-blue-200 pb-1"><span>Deuda Mant.:</span><span class="font-bold text-red-600">- ${formatCOP(81900472)}</span></div>
+                            <div class="flex justify-between pt-1 font-black text-sm sm:text-base"><span>Saldo Resultante:</span><span class="text-red-700">${formatCOP(-12211288)}</span></div>
                         </div>
-                        <p class="text-xs text-blue-800 mt-3 italic">Nota: El socio no tiene utilidades disponibles para retiro. El saldo negativo será cubierto con recaudo futuro de cartera o utilidades de próximos viajes (abril-mayo 2026).</p>
+                        <p class="text-[10px] sm:text-xs text-blue-800 mt-3 italic">Nota: Saldo negativo cubierto con futuro recaudo o utilidades (abril-mayo 2026).</p>
                     </div>
                 </div>
             </div>`;
         } 
         else if(s.niifTab === 'estado-situacion') {
-            content = `<div class="grid md:grid-cols-2 gap-8">
-                <div><h4 class="font-black mb-3 bg-slate-50 border border-slate-200 p-3 rounded-lg text-slate-800">ACTIVOS CORRIENTES Y NO CORRIENTES</h4><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Efectivo y Equivalentes (Caja)</span><span class="font-medium">${formatCOP(t.utilidadNeta - t.carteraTotal)}</span></div><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Cuentas Comerciales por Cobrar</span><span class="font-medium">${formatCOP(t.carteraTotal)}</span></div><div class="flex justify-between font-black text-lg pt-3 mt-1"><span>TOTAL ACTIVOS</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
-                <div><h4 class="font-black mb-3 bg-slate-50 border border-slate-200 p-3 rounded-lg text-slate-800">PASIVOS Y PATRIMONIO</h4><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Cuentas por Pagar (Mantenimiento PRI)</span><span class="font-medium">${formatCOP(81900472)}</span></div><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Capital Social Suscrito</span><span class="font-medium">${formatCOP(t.inversionTotal)}</span></div><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Utilidades Retenidas del Ejercicio</span><span class="font-medium">${formatCOP(t.utilidadNeta - 81900472)}</span></div><div class="flex justify-between font-black text-lg text-blue-700 pt-3 mt-1"><span>TOTAL PAS. + PAT.</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
+            content = `<div class="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
+                <div><h4 class="font-black mb-3 bg-slate-50 border border-slate-200 p-2 sm:p-3 rounded-lg text-slate-800 text-xs sm:text-sm">ACTIVOS CORRIENTES Y NO CORRIENTES</h4><div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Efectivo y Equivalentes</span><span class="font-medium">${formatCOP(t.utilidadNeta - t.carteraTotal)}</span></div><div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Cuentas por Cobrar</span><span class="font-medium">${formatCOP(t.carteraTotal)}</span></div><div class="flex justify-between font-black text-base sm:text-lg pt-3 mt-1"><span>TOTAL ACTIVOS</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
+                <div><h4 class="font-black mb-3 bg-slate-50 border border-slate-200 p-2 sm:p-3 rounded-lg text-slate-800 text-xs sm:text-sm">PASIVOS Y PATRIMONIO</h4><div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Cuentas por Pagar (PRI)</span><span class="font-medium">${formatCOP(81900472)}</span></div><div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Capital Social Suscrito</span><span class="font-medium">${formatCOP(t.inversionTotal)}</span></div><div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Utilidades Retenidas</span><span class="font-medium">${formatCOP(t.utilidadNeta - 81900472)}</span></div><div class="flex justify-between font-black text-base sm:text-lg text-blue-700 pt-3 mt-1"><span>TOTAL PAS. + PAT.</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
             </div>`;
         } else if (s.niifTab === 'resultados') {
-            content = `<div class="space-y-4 text-sm max-w-3xl mx-auto">
-                <div class="flex justify-between items-center font-bold bg-slate-50 border border-slate-200 p-3 rounded-lg"><span class="text-base text-slate-800">Ingresos de Actividades Ordinarias</span><span class="text-lg">${formatCOP(t.ingresoTotal)}</span></div>
-                <div class="flex justify-between items-center px-3 py-1"><span>(-) Costos Directos de Operación (Combustible, Insumos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.7)}</span></div>
-                <div class="flex justify-between items-center px-3 py-1 border-b border-slate-200 pb-3"><span>(-) Gastos de Personal (Nómina y Viáticos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.3)}</span></div>
-                <div class="flex justify-between items-center px-3 py-2 font-bold bg-green-50/50 rounded-lg"><span class="text-slate-800">Utilidad Bruta Operacional</span><span class="text-green-700">${formatCOP(t.utilidadBruta)}</span></div>
-                <div class="flex justify-between items-center font-black text-2xl text-green-600 pt-6 mt-4 border-t-2 border-green-200"><span class="uppercase tracking-tight">UTILIDAD NETA DEL PERIODO</span><span>${formatCOP(t.utilidadNeta)}</span></div>
+            content = `<div class="space-y-3 sm:space-y-4 text-xs sm:text-sm max-w-3xl mx-auto">
+                <div class="flex justify-between items-center font-bold bg-slate-50 border border-slate-200 p-2 sm:p-3 rounded-lg"><span class="text-sm sm:text-base text-slate-800">Ingresos Act. Ordinarias</span><span class="text-base sm:text-lg">${formatCOP(t.ingresoTotal)}</span></div>
+                <div class="flex justify-between items-center px-2 sm:px-3 py-1"><span>(-) Costos Directos</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.7)}</span></div>
+                <div class="flex justify-between items-center px-2 sm:px-3 py-1 border-b border-slate-200 pb-2 sm:pb-3"><span>(-) Gastos de Personal</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.3)}</span></div>
+                <div class="flex justify-between items-center px-2 sm:px-3 py-2 font-bold bg-green-50/50 rounded-lg"><span class="text-slate-800">Utilidad Bruta</span><span class="text-green-700">${formatCOP(t.utilidadBruta)}</span></div>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center font-black text-xl sm:text-2xl text-green-600 pt-4 sm:pt-6 mt-3 sm:mt-4 border-t-2 border-green-200"><span class="uppercase tracking-tight text-sm sm:text-xl">UTILIDAD NETA PERIODO</span><span class="mt-1 sm:mt-0">${formatCOP(t.utilidadNeta)}</span></div>
             </div>`;
         }
 
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <h2 class="text-2xl font-black flex items-center text-slate-800"><i data-lucide="landmark" class="mr-2 text-blue-600 w-6 h-6"></i> Módulo Financiero e Informes</h2>
+            <h2 class="text-xl sm:text-2xl font-black flex items-center text-slate-800"><i data-lucide="landmark" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> Módulo Financiero e Informes</h2>
             <div class="flex space-x-2 overflow-x-auto hide-scroll pb-2">
                 ${['informe-consolidado', 'estado-situacion', 'resultados'].map(tab => `
-                    <button onclick="App.setNiifTab('${tab}')" class="px-5 py-2.5 rounded-xl text-sm font-bold border transition-colors shadow-sm ${s.niifTab === tab ? 'bg-slate-800 text-white border-slate-900' : 'bg-white hover:bg-slate-50 text-slate-600'}">${tab.replace('-', ' ').toUpperCase()}</button>
+                    <button onclick="App.setNiifTab('${tab}')" class="px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold border transition-colors shadow-sm whitespace-nowrap ${s.niifTab === tab ? 'bg-slate-800 text-white border-slate-900' : 'bg-white hover:bg-slate-50 text-slate-600'}">${tab.replace('-', ' ').toUpperCase()}</button>
                 `).join('')}
             </div>
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-[400px]">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 md:p-8 min-h-[300px] sm:min-h-[400px]">
                 ${content}
             </div>
         </div>
@@ -565,95 +602,93 @@ const App = {
         const s = App.state;
         const periodos = [...new Set(s.viajes.map(v => v.periodo))].sort();
         const vFiltro = s.sociedadFiltroMes === 'Todos' ? s.viajes : s.viajes.filter(v => v.periodo === s.sociedadFiltroMes);
-        const utilidadPeriodo = vFiltro.reduce((acc, v) => acc + v.utilidadBruta, 0); // Utilidad a repartir
+        const utilidadPeriodo = vFiltro.reduce((acc, v) => acc + v.utilidadBruta, 0); 
 
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <div><h2 class="text-2xl font-bold">Participación Societaria y Cruce de Cuentas</h2></div>
-                <div class="flex items-center space-x-2"><span class="text-sm font-bold text-slate-600">Periodo:</span>
-                    <select onchange="App.setFilterVal('sociedadFiltroMes', this.value)" class="border border-slate-300 shadow-sm rounded-lg p-2.5 text-sm bg-white font-medium focus:ring focus:ring-blue-200">
-                        <option value="Todos" ${s.sociedadFiltroMes==='Todos'?'selected':''}>Histórico Total (Consolidado)</option>
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
+                <div><h2 class="text-2xl font-bold">Participación Societaria</h2></div>
+                <div class="flex items-center space-x-2 w-full sm:w-auto"><span class="text-sm font-bold text-slate-600 shrink-0">Periodo:</span>
+                    <select onchange="App.setFilterVal('sociedadFiltroMes', this.value)" class="w-full sm:w-auto border border-slate-300 shadow-sm rounded-lg p-2.5 text-sm bg-white font-medium focus:ring focus:ring-blue-200 outline-none">
+                        <option value="Todos" ${s.sociedadFiltroMes==='Todos'?'selected':''}>Histórico Total</option>
                         ${periodos.map(m => `<option value="${m}" ${s.sociedadFiltroMes===m?'selected':''}>${m}</option>`).join('')}
                     </select>
                 </div>
             </div>
-            <div class="bg-blue-50 border border-blue-200 p-5 rounded-2xl flex justify-between items-center shadow-sm">
-                <span class="text-blue-900 font-bold">Total Utilidad a Repartir (${s.sociedadFiltroMes}):</span>
-                <span class="text-blue-700 font-black text-3xl">${formatCOP(utilidadPeriodo)}</span>
+            <div class="bg-blue-50 border border-blue-200 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center shadow-sm gap-2 sm:gap-0">
+                <span class="text-blue-900 font-bold text-sm sm:text-base">Utilidad a Repartir (${s.sociedadFiltroMes}):</span>
+                <span class="text-blue-700 font-black text-2xl sm:text-3xl">${formatCOP(utilidadPeriodo)}</span>
             </div>
             <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left border-collapse min-w-[900px]">
-                        <thead><tr class="bg-slate-800 border-b text-white text-xs uppercase font-bold"><th class="p-4">Socio Inversionista</th><th class="p-4 text-center">% Part.</th><th class="p-4 text-right">Inversión Base</th><th class="p-4 text-right">Utilidad Causada</th><th class="p-4 text-right">Deuda Mantenimiento</th><th class="p-4 text-right bg-green-600">Saldo Líquido Actual</th></tr></thead>
+                <div class="w-full overflow-x-auto table-scroll">
+                    <table class="w-full text-left border-collapse min-w-[800px]">
+                        <thead><tr class="bg-slate-800 border-b text-white text-xs uppercase font-bold"><th class="p-3 sm:p-4">Socio Inversionista</th><th class="p-3 sm:p-4 text-center">% Part.</th><th class="p-3 sm:p-4 text-right">Inversión Base</th><th class="p-3 sm:p-4 text-right">Utilidad Causada</th><th class="p-3 sm:p-4 text-right">Deuda Mantenimiento</th><th class="p-3 sm:p-4 text-right bg-green-600">Saldo Líquido Actual</th></tr></thead>
                         <tbody>
                             ${s.socios.map(socio => {
-                                // Calculo dinámico según filtro
                                 const utilBruta = s.sociedadFiltroMes === 'Todos' ? socio.utilidadCausada : utilidadPeriodo * (socio.porcentaje / 100);
                                 let liquido = utilBruta;
                                 if (socio.saldoMantenimiento < 0 && s.sociedadFiltroMes === 'Todos') {
                                     const deudaAbs = Math.abs(socio.saldoMantenimiento);
-                                    liquido = utilBruta - deudaAbs; // Permite mostrar saldo negativo real para PRI
+                                    liquido = utilBruta - deudaAbs;
                                 }
                                 
                                 return `
                                 <tr class="border-b hover:bg-slate-50 transition-colors">
-                                    <td class="p-4 flex items-center"><div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-600 mr-3 shadow-sm border">${socio.nombre.charAt(0)}</div><span class="font-bold text-slate-800">${socio.nombre}</span></td>
-                                    <td class="p-4 text-center font-black text-blue-600 bg-blue-50/30">${socio.porcentaje}%</td>
-                                    <td class="p-4 text-right text-sm font-medium text-slate-600">${formatCOP(socio.inversion)}</td>
-                                    <td class="p-4 text-right font-bold text-slate-700">${formatCOP(utilBruta)}</td>
-                                    <td class="p-4 text-right text-xs"><span class="${socio.saldoMantenimiento < 0 ? 'text-red-600 font-black bg-red-50 border border-red-100 px-2 py-1.5 rounded-lg shadow-sm' : 'text-slate-400 font-medium'}">${socio.saldoMantenimiento < 0 ? formatCOP(socio.saldoMantenimiento) : 'A Paz y Salvo'}</span></td>
-                                    <td class="p-4 text-right bg-green-50/50 font-black text-lg ${liquido > 0 ? 'text-green-600' : (liquido < 0 ? 'text-red-600' : 'text-slate-400')}">${formatCOP(liquido)}</td>
+                                    <td class="p-3 sm:p-4 flex items-center whitespace-nowrap"><div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-600 mr-3 shadow-sm border shrink-0">${socio.nombre.charAt(0)}</div><span class="font-bold text-slate-800">${socio.nombre}</span></td>
+                                    <td class="p-3 sm:p-4 text-center font-black text-blue-600 bg-blue-50/30 whitespace-nowrap">${socio.porcentaje}%</td>
+                                    <td class="p-3 sm:p-4 text-right text-xs sm:text-sm font-medium text-slate-600 whitespace-nowrap">${formatCOP(socio.inversion)}</td>
+                                    <td class="p-3 sm:p-4 text-right font-bold text-slate-700 whitespace-nowrap">${formatCOP(utilBruta)}</td>
+                                    <td class="p-3 sm:p-4 text-right text-[10px] sm:text-xs whitespace-nowrap"><span class="${socio.saldoMantenimiento < 0 ? 'text-red-600 font-black bg-red-50 border border-red-100 px-2 py-1.5 rounded-lg shadow-sm' : 'text-slate-400 font-medium'}">${socio.saldoMantenimiento < 0 ? formatCOP(socio.saldoMantenimiento) : 'A Paz y Salvo'}</span></td>
+                                    <td class="p-3 sm:p-4 text-right bg-green-50/50 font-black text-base sm:text-lg whitespace-nowrap ${liquido > 0 ? 'text-green-600' : (liquido < 0 ? 'text-red-600' : 'text-slate-400')}">${formatCOP(liquido)}</td>
                                 </tr>`;
                             }).join('')}
                         </tbody>
                     </table>
                 </div>
             </div>
-            ${s.sociedadFiltroMes === 'Todos' ? `<p class="text-xs text-slate-500 italic mt-2"><i data-lucide="info" class="w-3 h-3 inline"></i> Nota: El saldo líquido en rojo indica una deuda del socio hacia la empresa que deberá cruzarse con futuras utilidades.</p>` : ''}
+            ${s.sociedadFiltroMes === 'Todos' ? `<p class="text-[10px] sm:text-xs text-slate-500 italic mt-2"><i data-lucide="info" class="w-3 h-3 inline"></i> Nota: El saldo líquido en rojo indica una deuda del socio hacia la empresa que deberá cruzarse con futuras utilidades.</p>` : ''}
         </div>`;
     },
 
     renderModals: () => {
         let h = ''; const s = App.state;
 
-        // Modal Form Viaje
-        if (s.isAddViajeOpen) h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"><div class="bg-white w-full max-w-md rounded-2xl p-6 animate-slide-up shadow-2xl"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Registrar Viaje Operativo</h3><button onclick="App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="App.submitViaje(event)" class="space-y-4"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Fecha de Cierre</label><input name="fecha" type="date" required class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Ruta</label><input name="ruta" type="text" placeholder="Ej: B/tura - Charco" required class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="grid grid-cols-2 gap-4"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Ingreso Bruto ($)</label><input name="ingreso" type="number" placeholder="Ej: 80000000" required class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Gastos Operativos ($)</label><input name="gastos" type="number" placeholder="Ej: 22000000" required class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Monto a Cartera (Deuda)</label><input name="cartera" type="number" placeholder="Si todo se pagó, deja 0" class="w-full border-2 border-orange-200 bg-orange-50 p-2.5 rounded-xl text-sm focus:border-orange-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Observaciones</label><textarea name="observaciones" placeholder="Detalles de la carga, responsables, etc." class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors h-20 resize-none"></textarea></div><button type="submit" class="w-full bg-blue-600 text-white font-black py-3.5 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all mt-2">Guardar Registro Consolidado</button></form></div></div>`;
-        
-        // Modal Form Cliente
-        if (s.isAddClienteOpen) h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"><div class="bg-white w-full max-w-md rounded-2xl p-6 animate-slide-up shadow-2xl"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Registrar Cliente</h3><button onclick="App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="App.submitCliente(event)" class="space-y-4"><input name="nombre" type="text" placeholder="Nombre Comercial / Contacto" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="telefono" type="text" placeholder="Teléfono" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="ubicacion" type="text" placeholder="Ubicación" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><select name="tipo" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option>Comerciante de Madera</option><option>Materiales Construcción</option><option>Equipos e Insumos</option><option>General</option></select><button type="submit" class="w-full bg-slate-900 text-white font-black py-3.5 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Guardar Cliente en Directorio</button></form></div></div>`;
-        
-        // Modal Form Nómina
+        // Formularios y Detalles... (Mismo código interno, asegurando márgenes fluidos)
+        const modalContainerClass = "fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 print:hidden";
+        const modalBoxClass = "bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 animate-slide-up shadow-2xl overflow-y-auto max-h-[90vh]";
+
+        if (s.isAddViajeOpen) h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Registrar Viaje</h3><button onclick="App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="App.submitViaje(event)" class="space-y-4"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Fecha</label><input name="fecha" type="date" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Ruta</label><input name="ruta" type="text" placeholder="Ej: B/tura - Charco" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="grid grid-cols-2 gap-4"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Ingreso Bruto</label><input name="ingreso" type="number" placeholder="$" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Gastos</label><input name="gastos" type="number" placeholder="$" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Cartera (Deuda)</label><input name="cartera" type="number" placeholder="Si pagó todo, 0" class="w-full border-2 border-orange-200 bg-orange-50 p-3 rounded-xl text-sm focus:border-orange-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Observaciones</label><textarea name="observaciones" placeholder="Detalles de la carga..." class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors h-20 resize-none"></textarea></div><button type="submit" class="w-full bg-blue-600 text-white font-black py-4 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all mt-2">Guardar Consolidado</button></form></div></div>`;
+        if (s.isAddClienteOpen) h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Registrar Cliente</h3><button onclick="App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="App.submitCliente(event)" class="space-y-4"><input name="nombre" type="text" placeholder="Nombre Comercial" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="telefono" type="text" placeholder="Teléfono" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="ubicacion" type="text" placeholder="Ubicación" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><select name="tipo" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option>Comerciante de Madera</option><option>Materiales Construcción</option><option>Equipos e Insumos</option><option>General</option></select><button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Guardar Cliente</button></form></div></div>`;
         if (s.isAddNominaOpen) {
             const tN = formatCOP(s.nomina.reduce((a, c) => a + (c.valorDia * c.dias), 0));
-            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"><div class="bg-white w-full max-w-sm rounded-2xl p-6 animate-slide-up shadow-2xl"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Liquidar Viaje</h3><button onclick="App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="App.submitNomina(event)" class="space-y-4"><input name="fecha" type="date" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><select name="viaje" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="">Seleccione Viaje a Liquidar</option>${s.viajes.map(v => `<option value="${v.viaje}">${v.viaje} (${v.periodo})</option>`).join('')}</select><div class="bg-blue-50 border border-blue-100 p-5 rounded-xl text-center mt-6 shadow-inner"><p class="text-xs font-bold text-blue-800 uppercase tracking-widest mb-1">Total a Liquidar</p><p class="text-3xl font-black text-blue-600 drop-shadow-sm">${tN}</p></div><button type="submit" class="w-full bg-slate-900 text-white font-black py-3.5 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-4">Confirmar y Guardar</button></form></div></div>`;
+            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Liquidar Viaje</h3><button onclick="App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="App.submitNomina(event)" class="space-y-4"><input name="fecha" type="date" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><select name="viaje" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="">Seleccione Viaje</option>${s.viajes.map(v => `<option value="${v.viaje}">${v.viaje} (${v.periodo})</option>`).join('')}</select><div class="bg-blue-50 border border-blue-100 p-5 rounded-xl text-center mt-6 shadow-inner"><p class="text-xs font-bold text-blue-800 uppercase tracking-widest mb-1">Total a Liquidar</p><p class="text-3xl font-black text-blue-600 drop-shadow-sm">${tN}</p></div><button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-4">Confirmar y Guardar</button></form></div></div>`;
         }
 
         // Modal Detalle Viaje
         if (s.selectedViaje) {
             const v = s.selectedViaje;
-            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4" onclick="App.closeModals()">
-                <div class="bg-white w-full max-w-md rounded-3xl overflow-hidden animate-slide-up shadow-2xl" onclick="event.stopPropagation()">
+            h += `<div class="${modalContainerClass}" onclick="App.closeModals()">
+                <div class="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden animate-slide-up shadow-2xl" onclick="event.stopPropagation()">
                     <div class="p-5 border-b bg-slate-50 flex justify-between items-center">
                         <div><h3 class="font-black text-xl text-slate-800">${v.viaje}</h3><p class="text-xs font-bold text-slate-500 uppercase">${v.periodo} • ${v.fecha}</p></div>
                         <button onclick="App.closeModals()" class="bg-slate-200 p-2 rounded-full text-slate-500 hover:bg-slate-300 transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
                     </div>
-                    <div class="p-6 space-y-5">
-                        <div class="flex justify-between items-center border-b border-slate-100 pb-4"><span class="text-sm font-bold text-slate-500 uppercase">Ruta</span><span class="font-black text-slate-800 bg-slate-100 px-3 py-1 rounded-lg">${v.ruta}</span></div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="bg-blue-50 p-4 rounded-2xl border border-blue-100"><p class="text-xs text-blue-700 font-bold uppercase mb-1">Ingreso Bruto</p><p class="font-black text-lg text-blue-900">${formatCOP(v.ingreso)}</p></div>
-                            <div class="bg-red-50 p-4 rounded-2xl border border-red-100"><p class="text-xs text-red-700 font-bold uppercase mb-1">Costos Operativos</p><p class="font-black text-lg text-red-900">${formatCOP(v.gastos)}</p></div>
+                    <div class="p-6 space-y-4">
+                        <div class="flex justify-between items-center border-b border-slate-100 pb-3"><span class="text-sm font-bold text-slate-500 uppercase">Ruta</span><span class="font-black text-xs sm:text-sm text-slate-800 bg-slate-100 px-3 py-1 rounded-lg">${v.ruta}</span></div>
+                        <div class="grid grid-cols-2 gap-3 sm:gap-4">
+                            <div class="bg-blue-50 p-3 sm:p-4 rounded-2xl border border-blue-100"><p class="text-[10px] sm:text-xs text-blue-700 font-bold uppercase mb-1">Ingreso Bruto</p><p class="font-black text-sm sm:text-lg text-blue-900">${formatCOP(v.ingreso)}</p></div>
+                            <div class="bg-red-50 p-3 sm:p-4 rounded-2xl border border-red-100"><p class="text-[10px] sm:text-xs text-red-700 font-bold uppercase mb-1">Costos</p><p class="font-black text-sm sm:text-lg text-red-900">${formatCOP(v.gastos)}</p></div>
                         </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="bg-green-50 p-4 rounded-2xl border border-green-100"><p class="text-xs text-green-700 font-bold uppercase mb-1">Utilidad Bruta</p><p class="font-black text-lg text-green-900">${formatCOP(v.utilidadBruta)}</p></div>
-                            <div class="bg-orange-50 p-4 rounded-2xl border border-orange-100"><p class="text-xs text-orange-700 font-bold uppercase mb-1">Cuentas x Cobrar</p><p class="font-black text-lg text-orange-900">${formatCOP(v.cartera)}</p></div>
+                        <div class="grid grid-cols-2 gap-3 sm:gap-4">
+                            <div class="bg-green-50 p-3 sm:p-4 rounded-2xl border border-green-100"><p class="text-[10px] sm:text-xs text-green-700 font-bold uppercase mb-1">Util. Bruta</p><p class="font-black text-sm sm:text-lg text-green-900">${formatCOP(v.utilidadBruta)}</p></div>
+                            <div class="bg-orange-50 p-3 sm:p-4 rounded-2xl border border-orange-100"><p class="text-[10px] sm:text-xs text-orange-700 font-bold uppercase mb-1">Por Cobrar</p><p class="font-black text-sm sm:text-lg text-orange-900">${formatCOP(v.cartera)}</p></div>
                         </div>
                         <div class="bg-slate-800 p-4 rounded-2xl flex justify-between items-center shadow-inner">
-                            <span class="font-bold text-slate-300 text-sm uppercase tracking-wide">Ingreso Recaudado</span>
-                            <span class="font-black text-2xl text-white">${formatCOP(v.ingresoRecaudado)}</span>
+                            <span class="font-bold text-slate-300 text-[10px] sm:text-sm uppercase tracking-wide">Recaudado</span>
+                            <span class="font-black text-lg sm:text-2xl text-white">${formatCOP(v.ingresoRecaudado)}</span>
                         </div>
-                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 text-sm">
-                            <p class="font-bold text-slate-700 mb-1 flex items-center"><i data-lucide="file-text" class="w-4 h-4 mr-1"></i> Observaciones Generales</p>
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs sm:text-sm">
+                            <p class="font-bold text-slate-700 mb-1 flex items-center"><i data-lucide="file-text" class="w-4 h-4 mr-1"></i> Observaciones</p>
                             <p class="text-slate-600">${v.observaciones}</p>
                         </div>
                     </div>
@@ -661,32 +696,32 @@ const App = {
             </div>`;
         }
 
-        // Modal Detalle Cliente (Cartera)
+        // Modal Detalle Cliente
         if (s.selectedCliente) {
             const c = s.selectedCliente;
             const viajesDeuda = s.carteraViajes.filter(cv => cv.cliente.includes(c.cliente));
-            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4" onclick="App.closeModals()">
-                <div class="bg-white w-full max-w-md rounded-3xl overflow-hidden animate-slide-up shadow-2xl" onclick="event.stopPropagation()">
+            h += `<div class="${modalContainerClass}" onclick="App.closeModals()">
+                <div class="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden animate-slide-up shadow-2xl" onclick="event.stopPropagation()">
                     <div class="p-5 border-b bg-slate-50 flex justify-between items-center">
-                        <h3 class="font-black text-xl text-slate-800 flex items-center"><i data-lucide="user" class="w-6 h-6 mr-2 text-blue-600 bg-blue-100 p-1 rounded-md"></i> ${c.cliente}</h3>
+                        <h3 class="font-black text-lg sm:text-xl text-slate-800 flex items-center"><i data-lucide="user" class="w-5 h-5 sm:w-6 sm:h-6 mr-2 text-blue-600 bg-blue-100 p-1 rounded-md"></i> ${c.cliente}</h3>
                         <button onclick="App.closeModals()" class="bg-slate-200 p-2 rounded-full text-slate-500 hover:bg-slate-300 transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
                     </div>
-                    <div class="p-6">
-                        <div class="bg-orange-50 p-6 rounded-2xl border border-orange-200 text-center mb-6 shadow-inner">
-                            <p class="text-xs text-orange-800 font-bold uppercase tracking-widest mb-2">Deuda Total Consolidada</p>
-                            <p class="text-4xl font-black text-orange-600 drop-shadow-sm">${formatCOP(c.valorTotal)}</p>
+                    <div class="p-5 sm:p-6">
+                        <div class="bg-orange-50 p-5 sm:p-6 rounded-2xl border border-orange-200 text-center mb-5 sm:mb-6 shadow-inner">
+                            <p class="text-[10px] sm:text-xs text-orange-800 font-bold uppercase tracking-widest mb-1 sm:mb-2">Deuda Total</p>
+                            <p class="text-2xl sm:text-4xl font-black text-orange-600 drop-shadow-sm">${formatCOP(c.valorTotal)}</p>
                         </div>
-                        <h4 class="font-bold text-slate-800 mb-3 text-sm flex items-center"><i data-lucide="list" class="w-4 h-4 mr-1 text-slate-400"></i> Detalle de Facturas/Viajes</h4>
-                        <div class="space-y-2 mb-6 max-h-40 overflow-y-auto pr-2">
+                        <h4 class="font-bold text-slate-800 mb-3 text-xs sm:text-sm flex items-center"><i data-lucide="list" class="w-4 h-4 mr-1 text-slate-400"></i> Detalle de Facturas</h4>
+                        <div class="space-y-2 mb-5 max-h-40 overflow-y-auto pr-2">
                             ${viajesDeuda.map(vd => `
                                 <div class="bg-slate-50 border border-slate-100 p-3 rounded-xl flex justify-between items-center">
-                                    <div><p class="font-bold text-slate-700 text-sm">${vd.viaje}</p><p class="text-xs text-slate-500">${vd.concepto}</p></div>
-                                    <span class="font-black text-orange-600">${formatCOP(vd.valor)}</span>
+                                    <div><p class="font-bold text-slate-700 text-xs sm:text-sm">${vd.viaje}</p><p class="text-[10px] sm:text-xs text-slate-500">${vd.concepto}</p></div>
+                                    <span class="font-black text-orange-600 text-xs sm:text-sm">${formatCOP(vd.valor)}</span>
                                 </div>
                             `).join('')}
                         </div>
-                        <button class="w-full bg-slate-900 text-white py-4 rounded-xl font-black text-lg hover:bg-slate-800 shadow-lg shadow-slate-900/20 transition-all flex items-center justify-center">
-                            <i data-lucide="check-circle-2" class="w-5 h-5 mr-2"></i> Registrar Abono o Pago Total
+                        <button class="w-full bg-slate-900 text-white py-3.5 sm:py-4 rounded-xl font-black text-base sm:text-lg hover:bg-slate-800 shadow-lg shadow-slate-900/20 transition-all flex items-center justify-center">
+                            <i data-lucide="check-circle-2" class="w-5 h-5 mr-2"></i> Registrar Pago
                         </button>
                     </div>
                 </div>
@@ -715,26 +750,18 @@ const App = {
         // Estructura Base Global
         root.innerHTML = `
             ${App.renderModals()}
-            <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden shadow-sm">
-                <h1 class="text-xl font-black text-slate-800 flex items-center tracking-tight"><i data-lucide="anchor" class="mr-2 text-blue-600 w-6 h-6"></i> Don Sebe ERP</h1>
-                <div class="bg-slate-900 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-md flex items-center"><div class="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div> Administrador</div>
+            
+            <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden shadow-sm sticky top-0">
+                <div class="flex items-center">
+                    ${App.state.activeTab !== 'dashboard' ? `<button onclick="App.setTab('dashboard')" class="mr-3 sm:mr-4 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
+                    <h1 onclick="App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> Don Sebe</h1>
+                </div>
+                <div class="bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold shadow-md flex items-center"><div class="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div> Admin</div>
             </header>
             
-            <main class="flex-1 overflow-y-auto p-4 md:p-6 pb-24 bg-slate-50 print:bg-white print:p-0">
+            <main class="flex-1 overflow-y-auto p-4 md:p-6 pb-8 bg-slate-50 print:bg-white print:p-0">
                 <div class="max-w-6xl mx-auto">${mainContent}</div>
             </main>
-
-            <nav class="bg-white border-t border-slate-200 shrink-0 pb-safe fixed bottom-0 w-full z-40 print:hidden shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
-                <div class="max-w-6xl mx-auto flex justify-between overflow-x-auto hide-scroll px-2">
-                    ${App.navItems.map(item => `
-                        <button onclick="App.setTab('${item.id}')" class="flex flex-col items-center p-3 min-w-[4.5rem] relative transition-colors ${App.state.activeTab === item.id ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}">
-                            <i data-lucide="${item.icon}" class="w-5 h-5 mb-1 transition-transform ${App.state.activeTab === item.id ? 'scale-110' : ''}"></i>
-                            <span class="text-[10px] font-bold">${item.label}</span>
-                            ${App.state.activeTab === item.id ? '<div class="absolute top-0 w-8 h-1 bg-blue-600 rounded-b-full"></div>' : ''}
-                        </button>
-                    `).join('')}
-                </div>
-            </nav>
         `;
 
         lucide.createIcons();
@@ -743,13 +770,12 @@ const App = {
         if(App.state.activeTab === 'dashboard') {
             const ctx = document.getElementById('lineChart');
             if(ctx) {
-                // Extrayendo datos de la simulación de periodos para la gráfica
                 const s = App.state;
-                const labels = s.informePeriodos.map(p => p.periodo.split(' ')[0]); // Oct-Nov, Diciembre, Enero
+                const labels = s.informePeriodos.map(p => p.periodo.split(' ')[0]); 
                 const ingresosBrutos = s.informePeriodos.map(p => p.ingresoProy); 
                 const utilidadesBrutas = s.informePeriodos.map(p => p.utilProy);
-                const utilidadesNetas = s.informePeriodos.map(p => p.utilReal); // Recaudadas
-                const costos = s.informePeriodos.map(p => p.ingresoProy - p.utilProy); // Estimación matemática basada en proyecciones
+                const utilidadesNetas = s.informePeriodos.map(p => p.utilReal); 
+                const costos = s.informePeriodos.map(p => p.ingresoProy - p.utilProy); 
 
                 if(window.dashChart) window.dashChart.destroy();
                 window.dashChart = new Chart(ctx, {
@@ -757,10 +783,10 @@ const App = {
                     data: { 
                         labels: labels, 
                         datasets: [
-                            { label: 'Ingresos Brutos', data: ingresosBrutos, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4, borderWidth: 3, fill: true }, 
-                            { label: 'Costos (Gastos)', data: costos, borderColor: '#ef4444', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, borderDash: [5, 5] },
-                            { label: 'Utilidades Brutas', data: utilidadesBrutas, borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2 },
-                            { label: 'Utilidades Netas (Recaudo Real)', data: utilidadesNetas, borderColor: '#0f766e', backgroundColor: 'rgba(15, 118, 110, 0.1)', tension: 0.4, borderWidth: 4, fill: true }
+                            { label: 'Ingresos', data: ingresosBrutos, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }, 
+                            { label: 'Costos', data: costos, borderColor: '#ef4444', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, borderDash: [5, 5], pointRadius: 2 },
+                            { label: 'Util. Bruta', data: utilidadesBrutas, borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, pointRadius: 2 },
+                            { label: 'Util. Neta', data: utilidadesNetas, borderColor: '#0f766e', backgroundColor: 'rgba(15, 118, 110, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }
                         ]
                     },
                     options: { 
@@ -768,7 +794,12 @@ const App = {
                         maintainAspectRatio: false, 
                         interaction: { mode: 'index', intersect: false },
                         plugins: { 
-                            legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8, font: { weight: 'bold' } } },
+                            legend: { 
+                                position: 'bottom', 
+                                labels: { 
+                                    usePointStyle: true, boxWidth: 6, font: { weight: 'bold', size: window.innerWidth < 640 ? 10 : 12 } 
+                                } 
+                            },
                             tooltip: { callbacks: { label: function(context) { return context.dataset.label + ': ' + formatCOP(context.parsed.y); } } }
                         }, 
                         scales: { 
@@ -776,12 +807,12 @@ const App = {
                                 beginAtZero: true, 
                                 grid: { color: '#f1f5f9' },
                                 ticks: { 
-                                    font: { weight: 'bold' },
+                                    font: { weight: 'bold', size: 10 },
                                     color: '#94a3b8',
                                     callback: function(value) { return '$' + (value / 1000000) + 'M'; } 
                                 } 
                             },
-                            x: { grid: { display: false }, ticks: { font: { weight: 'bold' }, color: '#64748b' } }
+                            x: { grid: { display: false }, ticks: { font: { weight: 'bold', size: 10 }, color: '#64748b' } }
                         } 
                     }
                 });
