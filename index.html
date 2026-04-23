@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Don Sebe ERP - Sistema Operativo Completo</title>
+    <link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icono.png">
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Chart.js para NIIF/Dashboard -->
@@ -11,7 +15,7 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <style>
+    <style><>
         /* Animaciones base y utilidades nativas */
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -43,7 +47,7 @@ const formatCOP = (value) => new Intl.NumberFormat('es-CO', {
 const App = {
     state: {
         activeTab: 'dashboard',
-        niifTab: 'estado-situacion',
+        niifTab: 'informe-consolidado',
         docTab: 'escaner',
         sociedadFiltroMes: 'Todos',
         carteraViajeFiltro: 'Todos',
@@ -56,13 +60,13 @@ const App = {
         isAddClienteOpen: false,
         isAddNominaOpen: false,
 
-        // Datos (Mock BD)
+        // Datos (Mock BD Cruzada con Archivos Reales)
         viajes: [
-            { id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, cartera: 12411000, observaciones: 'Madera bajada Satinga (Oscar)' },
-            { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, cartera: 11084000, observaciones: 'Madera Oscar' },
-            { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, cartera: 0, observaciones: 'Flete completo pagado' },
-            { id: 4, fecha: '2025-12-02', viaje: 'Viaje #4', ruta: 'B/tura - Charco', ingreso: 80023500, gastos: 22800000, cartera: 32119500, observaciones: 'Tubos, Grava, Varillas Tola (Alex) y Proyecto Hospital' },
-            { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, cartera: 0, observaciones: 'Viaje Tumaco sin cartera' }
+            { id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, utilidadBruta: 37849000, cartera: 12411000, ingresoRecaudado: 54545000, observaciones: 'Madera bajada Satinga (Oscar)' },
+            { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, utilidadBruta: 28100000, cartera: 11084000, ingresoRecaudado: 35356300, observaciones: 'Madera Oscar' },
+            { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, utilidadBruta: 46260000, cartera: 0, ingresoRecaudado: 73131000, observaciones: 'Flete completo pagado' },
+            { id: 4, fecha: '2025-12-02', viaje: 'Viaje #4', periodo: 'Diciembre 2025', ruta: 'B/tura - Charco', ingreso: 80023500, gastos: 22800000, utilidadBruta: 57223500, cartera: 32119500, ingresoRecaudado: 47904000, observaciones: 'Tubos, Grava, Varillas Tola (Alex) y Proyecto Hospital' },
+            { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', periodo: 'Diciembre 2025', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, utilidadBruta: 18820000, cartera: 0, ingresoRecaudado: 34820000, observaciones: 'Viaje Tumaco sin cartera' }
         ],
         carteraViajes: [
             { id: 1, idViaje: 1, viaje: 'Viaje #1', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 12411000, fecha: '2025-10-25' },
@@ -86,12 +90,12 @@ const App = {
             { id: 4, cliente: 'Konny Hospital', conceptoGeneral: 'Transporte Hospital', valorTotal: 1000000, viajesAsociados: 'Viaje #4', estado: 'Pendiente' }
         ],
         socios: [
-            { nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -12211288 },
-            { nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0 },
-            { nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0 },
-            { nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0 },
-            { nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0 },
-            { nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0 }
+            { nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -81900472, utilidadCausada: 69689184 },
+            { nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0, utilidadCausada: 67946954 },
+            { nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0, utilidadCausada: 26133444 },
+            { nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0, utilidadCausada: 3867751 },
+            { nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0, utilidadCausada: 3379991 },
+            { nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0, utilidadCausada: 2961849 }
         ],
         nomina: [
             { cargo: 'Capitán', valorDia: 190000, dias: 5 },
@@ -109,6 +113,11 @@ const App = {
             { id: 4, fecha: '2025-12-07', viaje: 'Viaje #4', valor: 3200000, estado: 'Pagado' },
             { id: 5, fecha: '2025-12-28', viaje: 'Viaje #5', valor: 3200000, estado: 'Pagado' }
         ],
+        informePeriodos: [
+            { periodo: 'Oct-Nov 2025', ingresoProy: 186527300, ingresoReal: 163032300, utilProy: 112209000, utilReal: 88714000, cartera: 23495000 },
+            { periodo: 'Diciembre 2025', ingresoProy: 114851610, ingresoReal: 82732110, utilProy: 77226610, utilReal: 45107110, cartera: 32119500 },
+            { periodo: 'Enero 2026', ingresoProy: 107125600, ingresoReal: 52325600, utilProy: 77125600, utilReal: 22325600, cartera: 54800000 },
+        ]
     },
 
     navItems: [
@@ -144,10 +153,12 @@ const App = {
         const s = App.state;
         const ingresoTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.ingreso), 0);
         const gastoTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.gastos), 0);
+        const utilidadBruta = s.viajes.reduce((acc, curr) => acc + Number(curr.utilidadBruta), 0);
         const carteraTotal = s.carteraClientes.filter(c => c.estado === 'Pendiente').reduce((acc, curr) => acc + Number(curr.valorTotal), 0);
-        const utilidadNeta = ingresoTotal - gastoTotal;
+        const utilidadNeta = ingresoTotal - gastoTotal; // Utilidad generada total
+        const ingresoRecaudado = ingresoTotal - carteraTotal;
         const inversionTotal = s.socios.reduce((acc, curr) => acc + curr.inversion, 0);
-        return { ingresoTotal, gastoTotal, carteraTotal, utilidadNeta, inversionTotal };
+        return { ingresoTotal, gastoTotal, utilidadBruta, carteraTotal, utilidadNeta, ingresoRecaudado, inversionTotal };
     },
 
     handleMockUpload: () => {
@@ -164,10 +175,11 @@ const App = {
     // Handlers de formularios
     submitViaje: (e) => {
         e.preventDefault(); const f = e.target;
+        const ing = Number(f.ingreso.value); const gas = Number(f.gastos.value); const car = Number(f.cartera.value || 0);
         App.state.viajes.push({
-            id: App.state.viajes.length + 1, viaje: `Viaje #${App.state.viajes.length + 1}`,
-            fecha: f.fecha.value, ruta: f.ruta.value, ingreso: Number(f.ingreso.value), 
-            gastos: Number(f.gastos.value), cartera: Number(f.cartera.value || 0), observaciones: f.observaciones.value
+            id: App.state.viajes.length + 1, viaje: `Viaje #${App.state.viajes.length + 1}`, periodo: 'Nuevo Periodo',
+            fecha: f.fecha.value, ruta: f.ruta.value, ingreso: ing, 
+            gastos: gas, utilidadBruta: ing - gas, cartera: car, ingresoRecaudado: ing - car, observaciones: f.observaciones.value
         });
         App.closeModals();
     },
@@ -197,29 +209,48 @@ const App = {
     renderDashboard: () => {
         const t = App.getTotales();
         const margenOperativo = t.ingresoTotal > 0 ? ((t.utilidadNeta / t.ingresoTotal) * 100).toFixed(1) : 0;
-        const eficienciaRecaudo = t.ingresoTotal > 0 ? (((t.ingresoTotal - t.carteraTotal) / t.ingresoTotal) * 100).toFixed(1) : 0;
+        const eficienciaRecaudo = t.ingresoTotal > 0 ? ((t.ingresoRecaudado / t.ingresoTotal) * 100).toFixed(1) : 0;
         const roi = t.inversionTotal > 0 ? ((t.utilidadNeta / t.inversionTotal) * 100).toFixed(2) : 0;
 
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
             <div>
-                <h2 class="text-xl md:text-2xl font-bold text-slate-800">Dashboard Operativo</h2>
-                <p class="text-sm text-slate-500">M/N Greicy Jireth - KPIs en Tiempo Real</p>
+                <h2 class="text-xl md:text-2xl font-bold text-slate-800">Dashboard Operativo y Financiero</h2>
+                <p class="text-sm text-slate-500">M/N Greicy Jireth - KPIs consolidados en Tiempo Real</p>
             </div>
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Ingresos</p><div class="p-1.5 bg-blue-50 rounded-lg text-blue-600"><i data-lucide="trending-up" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.ingresoTotal)}</h3></div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Gastos</p><div class="p-1.5 bg-red-50 rounded-lg text-red-600"><i data-lucide="file-spreadsheet" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.gastoTotal)}</h3></div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Utilidad</p><div class="p-1.5 bg-green-50 rounded-lg text-green-600"><i data-lucide="trending-up" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.utilidadNeta)}</h3></div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Cartera</p><div class="p-1.5 bg-orange-50 rounded-lg text-orange-600"><i data-lucide="alert-circle" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.carteraTotal)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Ingresos Brutos</p><div class="p-1.5 bg-blue-50 rounded-lg text-blue-600"><i data-lucide="trending-up" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.ingresoTotal)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Costos Operativos</p><div class="p-1.5 bg-red-50 rounded-lg text-red-600"><i data-lucide="file-spreadsheet" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.gastoTotal)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Utilidad Bruta</p><div class="p-1.5 bg-green-50 rounded-lg text-green-600"><i data-lucide="line-chart" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.utilidadBruta)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Cartera Activa</p><div class="p-1.5 bg-orange-50 rounded-lg text-orange-600"><i data-lucide="alert-circle" class="w-4 h-4"></i></div></div><h3 class="text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.carteraTotal)}</h3></div>
             </div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-80 flex flex-col"><h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center"><i data-lucide="trending-up" class="mr-2 text-blue-600 w-4 h-4"></i> Tendencia Financiera</h3><div class="flex-1 min-h-0 relative"><canvas id="lineChart"></canvas></div></div>
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-80 flex flex-col">
-                    <h3 class="text-sm font-bold text-slate-800 mb-6 flex items-center"><i data-lucide="trending-up" class="mr-2 text-green-500 w-4 h-4"></i> Eficiencia y Rendimiento</h3>
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="lg:col-span-2 bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-[400px] flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-sm font-bold text-slate-800 flex items-center"><i data-lucide="bar-chart-2" class="mr-2 text-blue-600 w-4 h-4"></i> Tendencia Financiera (Monto en Millones)</h3>
+                    </div>
+                    <div class="flex-1 min-h-0 relative"><canvas id="lineChart"></canvas></div>
+                </div>
+                
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 h-[400px] flex flex-col">
+                    <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center"><i data-lucide="activity" class="mr-2 text-green-500 w-4 h-4"></i> Eficiencia y Rendimiento</h3>
                     <div class="flex-1 flex flex-col justify-around">
-                        <div><div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Margen Operativo</span><span class="text-sm font-black text-slate-800">${margenOperativo}%</span></div><div class="w-full bg-slate-100 rounded-full h-2.5"><div class="bg-blue-500 h-2.5 rounded-full" style="width: ${Math.min(margenOperativo, 100)}%"></div></div></div>
-                        <div><div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Eficiencia Recaudo</span><span class="text-sm font-black text-slate-800">${eficienciaRecaudo}%</span></div><div class="w-full bg-slate-100 rounded-full h-2.5"><div class="bg-green-500 h-2.5 rounded-full" style="width: ${Math.min(eficienciaRecaudo, 100)}%"></div></div></div>
-                        <div><div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">ROI</span><span class="text-sm font-black text-slate-800">${roi}%</span></div><div class="w-full bg-slate-100 rounded-full h-2.5"><div class="bg-indigo-500 h-2.5 rounded-full" style="width: ${Math.min(roi, 100)}%"></div></div></div>
+                        <div class="group">
+                            <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Margen Operativo</span><span class="text-sm font-black text-slate-800">${margenOperativo}%</span></div>
+                            <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1"><div class="bg-blue-500 h-2.5 rounded-full" style="width: ${Math.min(margenOperativo, 100)}%"></div></div>
+                            <p class="text-[10px] text-slate-400 opacity-80 group-hover:opacity-100 transition-opacity">Mide la rentabilidad directa: cuánto del ingreso se convierte en utilidad neta tras descontar los gastos de operación del viaje.</p>
+                        </div>
+                        <div class="group">
+                            <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Eficiencia Recaudo</span><span class="text-sm font-black text-slate-800">${eficienciaRecaudo}%</span></div>
+                            <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1"><div class="bg-green-500 h-2.5 rounded-full" style="width: ${Math.min(eficienciaRecaudo, 100)}%"></div></div>
+                            <p class="text-[10px] text-slate-400 opacity-80 group-hover:opacity-100 transition-opacity">Indica qué porcentaje del ingreso facturado ya ha sido cobrado e ingresado en caja (libre de cartera pendiente).</p>
+                        </div>
+                        <div class="group">
+                            <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Retorno de Inversión (ROI)</span><span class="text-sm font-black text-slate-800">${roi}%</span></div>
+                            <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1"><div class="bg-indigo-500 h-2.5 rounded-full" style="width: ${Math.min(roi, 100)}%"></div></div>
+                            <p class="text-[10px] text-slate-400 opacity-80 group-hover:opacity-100 transition-opacity">Evalúa la eficiencia de la inversión global mostrando la relación entre la utilidad generada y el capital aportado por los socios.</p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -229,14 +260,23 @@ const App = {
     renderViajes: () => `
         <div class="space-y-6 animate-fade-in print:hidden">
             <div class="flex justify-between items-center">
-                <div><h2 class="text-2xl font-bold">Gestión de Viajes</h2><p class="text-sm text-slate-500">Historial operativo</p></div>
+                <div><h2 class="text-2xl font-bold">Gestión de Viajes</h2><p class="text-sm text-slate-500">Historial y cruce operativo</p></div>
                 <button onclick="App.state.isAddViajeOpen=true; App.render()" class="bg-blue-600 text-white px-4 py-2.5 rounded-xl shadow-sm font-bold hover:bg-blue-700 flex items-center"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Nuevo Viaje</button>
             </div>
             <div class="grid gap-3">
                 ${[...App.state.viajes].reverse().map(v => `
-                <div onclick="App.openModalViaje(${v.id})" class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center cursor-pointer hover:border-blue-300">
-                    <div class="flex items-center"><div class="bg-slate-100 p-3 rounded-lg mr-4"><i data-lucide="map" class="w-5 h-5"></i></div><div><h4 class="font-bold text-slate-800">${v.viaje} <span class="text-xs text-slate-400 ml-2">${v.fecha}</span></h4><p class="text-sm text-slate-500">${v.ruta}</p></div></div>
-                    <div class="text-right"><p class="text-[10px] uppercase font-bold text-slate-400">Utilidad</p><p class="font-black text-slate-800">${formatCOP(v.ingreso - v.gastos)}</p></div>
+                <div onclick="App.openModalViaje(${v.id})" class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex justify-between items-center cursor-pointer hover:border-blue-300 transition-colors">
+                    <div class="flex items-center">
+                        <div class="bg-slate-100 p-3 rounded-lg mr-4"><i data-lucide="map" class="w-5 h-5 text-slate-600"></i></div>
+                        <div>
+                            <h4 class="font-bold text-slate-800">${v.viaje} <span class="text-xs text-slate-400 font-normal ml-2">${v.fecha} • ${v.periodo}</span></h4>
+                            <p class="text-sm text-slate-500">${v.ruta}</p>
+                        </div>
+                    </div>
+                    <div class="flex space-x-6 text-right">
+                        <div class="hidden sm:block"><p class="text-[10px] uppercase font-bold text-slate-400">Ingreso Recaudado</p><p class="font-bold text-slate-700">${formatCOP(v.ingresoRecaudado)}</p></div>
+                        <div><p class="text-[10px] uppercase font-bold text-slate-400">Utilidad Bruta</p><p class="font-black text-green-600">${formatCOP(v.utilidadBruta)}</p></div>
+                    </div>
                 </div>`).join('')}
             </div>
         </div>`,
@@ -249,8 +289,8 @@ const App = {
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
             <div class="flex justify-between items-center">
-                <div><h2 class="text-2xl font-bold">Cartera de Clientes</h2><p class="text-sm text-slate-500">Deudas consolidadas</p></div>
-                <div class="bg-orange-100 text-orange-800 px-4 py-2.5 rounded-xl font-black border border-orange-200">Total Exigible: ${formatCOP(App.getTotales().carteraTotal)}</div>
+                <div><h2 class="text-2xl font-bold">Cartera de Clientes</h2><p class="text-sm text-slate-500">Deudas consolidadas y cotejadas</p></div>
+                <div class="bg-orange-100 text-orange-800 px-4 py-2.5 rounded-xl font-black border border-orange-200 shadow-sm">Total Exigible: ${formatCOP(App.getTotales().carteraTotal)}</div>
             </div>
 
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -259,10 +299,10 @@ const App = {
                         <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Cliente</th><th class="p-4">Concepto General</th><th class="p-4">Estado</th><th class="p-4 text-right">Total Adeudado</th></tr></thead>
                         <tbody>
                             ${s.carteraClientes.map(c => `
-                            <tr onclick="App.openModalCliente('${c.cliente}')" class="border-b hover:bg-slate-50 cursor-pointer">
+                            <tr onclick="App.openModalCliente('${c.cliente}')" class="border-b hover:bg-slate-50 cursor-pointer transition-colors">
                                 <td class="p-4 font-bold text-slate-800">${c.cliente}</td><td class="p-4 text-sm text-slate-600">${c.conceptoGeneral}</td>
-                                <td class="p-4"><span class="text-[10px] font-bold uppercase bg-orange-100 text-orange-700 px-2 py-1 rounded-md">${c.estado}</span></td>
-                                <td class="p-4 text-right font-bold text-orange-600">${formatCOP(c.valorTotal)}</td>
+                                <td class="p-4"><span class="text-[10px] font-bold uppercase bg-orange-100 text-orange-700 px-2 py-1 rounded-md border border-orange-200">${c.estado}</span></td>
+                                <td class="p-4 text-right font-black text-orange-600">${formatCOP(c.valorTotal)}</td>
                             </tr>`).join('')}
                         </tbody>
                     </table>
@@ -271,10 +311,10 @@ const App = {
 
             <div class="mt-8">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-lg font-bold flex items-center"><i data-lucide="ship" class="mr-2 text-slate-400 w-5 h-5"></i> Desglose por Viaje</h3>
-                    <select onchange="App.setFilterVal('carteraViajeFiltro', this.value)" class="border rounded-lg p-2 text-sm bg-white">
-                        <option value="Todos" ${s.carteraViajeFiltro === 'Todos'?'selected':''}>Ver Todos</option>
-                        ${s.viajes.map(v => `<option value="${v.viaje}" ${s.carteraViajeFiltro === v.viaje?'selected':''}>${v.viaje}</option>`).join('')}
+                    <h3 class="text-lg font-bold flex items-center"><i data-lucide="ship" class="mr-2 text-slate-400 w-5 h-5"></i> Desglose Cotejado por Viaje</h3>
+                    <select onchange="App.setFilterVal('carteraViajeFiltro', this.value)" class="border rounded-lg p-2 text-sm bg-white shadow-sm font-medium focus:ring focus:ring-blue-200">
+                        <option value="Todos" ${s.carteraViajeFiltro === 'Todos'?'selected':''}>Ver Todos los Viajes</option>
+                        ${s.viajes.map(v => `<option value="${v.viaje}" ${s.carteraViajeFiltro === v.viaje?'selected':''}>${v.viaje} (${v.periodo})</option>`).join('')}
                     </select>
                 </div>
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
@@ -282,9 +322,9 @@ const App = {
                         <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Viaje</th><th class="p-4">Cliente</th><th class="p-4">Concepto</th><th class="p-4 text-right">Monto</th></tr></thead>
                         <tbody>
                             ${cv.length ? cv.map(c => `
-                            <tr class="border-b hover:bg-slate-50"><td class="p-4 text-sm font-bold">${c.viaje}</td><td class="p-4 text-sm">${c.cliente}</td><td class="p-4 text-sm text-slate-500">${c.concepto}</td><td class="p-4 text-right font-bold text-orange-600">${formatCOP(c.valor)}</td></tr>`).join('') 
-                            : '<tr><td colspan="4" class="p-8 text-center text-slate-500">No hay deudas.</td></tr>'}
-                            ${cv.length ? `<tr class="bg-orange-50"><td colspan="3" class="p-4 text-right font-bold text-orange-900 text-sm uppercase">Total:</td><td class="p-4 text-right font-black text-orange-700 text-lg">${formatCOP(totalFiltro)}</td></tr>` : ''}
+                            <tr class="border-b hover:bg-slate-50"><td class="p-4 text-sm font-bold text-slate-700">${c.viaje}</td><td class="p-4 text-sm font-medium">${c.cliente}</td><td class="p-4 text-sm text-slate-500">${c.concepto}</td><td class="p-4 text-right font-bold text-orange-600">${formatCOP(c.valor)}</td></tr>`).join('') 
+                            : '<tr><td colspan="4" class="p-8 text-center text-slate-500">No hay deudas registradas para este filtro.</td></tr>'}
+                            ${cv.length ? `<tr class="bg-orange-50"><td colspan="3" class="p-4 text-right font-bold text-orange-900 text-sm uppercase">Total Filtro:</td><td class="p-4 text-right font-black text-orange-700 text-lg">${formatCOP(totalFiltro)}</td></tr>` : ''}
                         </tbody>
                     </table>
                 </div>
@@ -301,21 +341,21 @@ const App = {
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-10 text-center print:hidden">
                     <h3 class="font-bold text-xl mb-2">Carga Inteligente de Documentos</h3>
                     <p class="text-sm text-slate-500 mb-8">Sube archivos PDF o fotos de facturas para extraer datos.</p>
-                    <div class="border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-2xl p-10 flex flex-col items-center cursor-pointer hover:bg-blue-50">
+                    <div class="border-2 border-dashed border-blue-300 bg-blue-50/50 rounded-2xl p-10 flex flex-col items-center cursor-pointer hover:bg-blue-50 transition-colors">
                         <i data-lucide="file-image" class="text-blue-400 w-12 h-12 mb-4"></i>
-                        <p class="font-bold text-lg">Arrastra tu PDF o Imagen aquí</p>
-                        <button onclick="App.handleMockUpload()" ${s.isUploading ? 'disabled':''} class="mt-4 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold disabled:bg-slate-400">
-                            ${s.isUploading ? 'Procesando...' : 'Seleccionar Archivo'}
+                        <p class="font-bold text-lg text-slate-700">Arrastra tu PDF o Imagen aquí</p>
+                        <button onclick="App.handleMockUpload()" ${s.isUploading ? 'disabled':''} class="mt-4 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold disabled:bg-slate-400 shadow-sm">
+                            ${s.isUploading ? 'Procesando con IA...' : 'Seleccionar Archivo'}
                         </button>
                     </div>
                     ${s.uploadSuccess ? `
                     <div class="mt-8 bg-green-50 border border-green-200 p-6 rounded-xl text-left animate-slide-up">
                         <div class="flex items-center text-green-700 font-bold text-lg mb-4"><i data-lucide="check-circle" class="mr-2"></i> Documento Analizado Exitosamente</div>
-                        <div class="bg-white rounded-lg p-4 border border-green-100 grid grid-cols-2 gap-4 text-sm">
+                        <div class="bg-white rounded-lg p-4 border border-green-100 grid grid-cols-2 gap-4 text-sm shadow-sm">
                             <div><span class="font-bold text-slate-500 block">Concepto</span>Combustible (Acpm)</div>
                             <div><span class="font-bold text-slate-500 block">Fecha</span>15/12/2025</div>
                             <div><span class="font-bold text-slate-500 block">Proveedor</span>EDS XYZ</div>
-                            <div><span class="font-bold text-slate-500 block">Valor Extraído</span><span class="text-lg font-black">$ 3,450,000</span></div>
+                            <div><span class="font-bold text-slate-500 block">Valor Extraído</span><span class="text-lg font-black text-slate-800">$ 3,450,000</span></div>
                         </div>
                     </div>` : ''}
                 </div>`;
@@ -341,11 +381,11 @@ const App = {
         <div class="space-y-6 animate-fade-in">
             <div class="flex justify-between items-center print:hidden">
                 <div><h2 class="text-2xl font-bold">Centro de Documentos</h2></div>
-                <button onclick="window.print()" class="bg-slate-900 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center"><i data-lucide="printer" class="w-4 h-4 mr-2"></i> Imprimir</button>
+                <button onclick="window.print()" class="bg-slate-900 text-white px-4 py-2.5 rounded-xl font-semibold flex items-center shadow-sm hover:bg-slate-800"><i data-lucide="printer" class="w-4 h-4 mr-2"></i> Imprimir Reporte</button>
             </div>
-            <div class="flex space-x-2 overflow-x-auto pb-2 print:hidden">
-                ${[{id:'escaner', label:'Escanear', icon:'upload-cloud'},{id:'formato-ingresos', label:'Formato Ingresos', icon:'file-text'},{id:'formato-gastos', label:'Formato Gastos', icon:'file-text'}].map(t => `
-                    <button onclick="App.setDocTab('${t.id}')" class="flex items-center px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap border ${s.docTab===t.id ? 'bg-blue-600 text-white' : 'bg-white hover:bg-slate-50'}"><i data-lucide="${t.icon}" class="w-4 h-4 mr-2"></i> ${t.label}</button>
+            <div class="flex space-x-2 overflow-x-auto pb-2 print:hidden hide-scroll">
+                ${[{id:'escaner', label:'Escanear Múltiple', icon:'upload-cloud'},{id:'formato-ingresos', label:'Formato Ingresos', icon:'file-text'},{id:'formato-gastos', label:'Formato Gastos', icon:'file-text'}].map(t => `
+                    <button onclick="App.setDocTab('${t.id}')" class="flex items-center px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap border transition-colors ${s.docTab===t.id ? 'bg-blue-600 text-white border-blue-700' : 'bg-white hover:bg-slate-50 text-slate-700'}"><i data-lucide="${t.icon}" class="w-4 h-4 mr-2"></i> ${t.label}</button>
                 `).join('')}
             </div>
             ${content}
@@ -358,7 +398,7 @@ const App = {
         <div class="space-y-6 animate-fade-in print:hidden">
             <div class="flex justify-between items-center">
                 <div><h2 class="text-2xl font-bold">Directorio de Clientes</h2></div>
-                <button onclick="App.state.isAddClienteOpen=true; App.render()" class="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center"><i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Cliente</button>
+                <button onclick="App.state.isAddClienteOpen=true; App.render()" class="bg-blue-600 text-white px-4 py-2.5 rounded-xl font-bold flex items-center shadow-sm hover:bg-blue-700"><i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Cliente</button>
             </div>
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
                 <table class="w-full text-left border-collapse min-w-[800px]">
@@ -368,11 +408,11 @@ const App = {
                             const deuda = s.carteraClientes.find(car => car.cliente.includes(c.nombre));
                             const tieneDeuda = deuda && deuda.estado === 'Pendiente';
                             return `
-                            <tr class="border-b hover:bg-slate-50 cursor-pointer" onclick="${tieneDeuda ? `App.openModalCliente('${deuda.cliente}')` : ''}">
-                                <td class="p-4 flex items-center"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mr-3">${c.nombre.charAt(0)}</div><span class="font-bold">${c.nombre}</span></td>
-                                <td class="p-4 text-sm text-slate-600"><span class="bg-slate-100 px-2 py-1 rounded-md text-xs">${c.tipo}</span></td>
-                                <td class="p-4 text-sm">${c.telefono}</td><td class="p-4 text-sm">${c.ubicacion}</td>
-                                <td class="p-4 text-right"><div class="inline-block px-3 py-1 rounded-lg text-xs font-bold ${tieneDeuda ? 'bg-orange-50 text-orange-700 border-orange-100 border' : 'bg-green-50 text-green-700 border-green-100 border'}">${tieneDeuda ? formatCOP(deuda.valorTotal) : 'A Paz y Salvo'}</div></td>
+                            <tr class="border-b hover:bg-slate-50 cursor-pointer transition-colors" onclick="${tieneDeuda ? `App.openModalCliente('${deuda.cliente}')` : ''}">
+                                <td class="p-4 flex items-center"><div class="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold mr-3">${c.nombre.charAt(0)}</div><span class="font-bold text-slate-800">${c.nombre}</span></td>
+                                <td class="p-4 text-sm text-slate-600"><span class="bg-slate-100 px-2 py-1 rounded-md text-xs border border-slate-200">${c.tipo}</span></td>
+                                <td class="p-4 text-sm font-medium">${c.telefono}</td><td class="p-4 text-sm">${c.ubicacion}</td>
+                                <td class="p-4 text-right"><div class="inline-block px-3 py-1 rounded-lg text-xs font-bold ${tieneDeuda ? 'bg-orange-50 text-orange-700 border-orange-200 border' : 'bg-green-50 text-green-700 border-green-200 border'}">${tieneDeuda ? formatCOP(deuda.valorTotal) : 'A Paz y Salvo'}</div></td>
                             </tr>`
                         }).join('')}
                     </tbody>
@@ -390,26 +430,26 @@ const App = {
         <div class="space-y-6 animate-fade-in print:hidden">
             <div class="flex justify-between items-center">
                 <div><h2 class="text-2xl font-bold">Gestión de Nómina</h2></div>
-                <button onclick="App.state.isAddNominaOpen=true; App.render()" class="bg-slate-900 text-white px-4 py-2.5 rounded-xl font-bold flex items-center"><i data-lucide="badge-dollar-sign" class="w-4 h-4 mr-2"></i> Liquidar Nómina</button>
+                <button onclick="App.state.isAddNominaOpen=true; App.render()" class="bg-slate-900 text-white px-4 py-2.5 rounded-xl font-bold flex items-center shadow-sm hover:bg-slate-800"><i data-lucide="badge-dollar-sign" class="w-4 h-4 mr-2"></i> Liquidar Nómina</button>
             </div>
             <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                    <div class="p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center"><i data-lucide="users" class="mr-2 text-slate-500 w-5 h-5"></i> Tarifas de Tripulación</h3></div>
+                    <div class="p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800"><i data-lucide="users" class="mr-2 text-blue-500 w-5 h-5"></i> Tarifas de Tripulación (Actualizadas 2026)</h3></div>
                     <table class="w-full text-left border-collapse">
-                        <thead><tr class="text-slate-500 text-xs uppercase border-b"><th class="p-4">Cargo</th><th class="p-4 text-right">Tarifa Día</th><th class="p-4 text-right">Ref. Viaje (5D)</th></tr></thead>
+                        <thead><tr class="text-slate-500 text-xs uppercase border-b bg-white"><th class="p-4">Cargo</th><th class="p-4 text-right">Tarifa Día</th><th class="p-4 text-right">Ref. Viaje (5D)</th></tr></thead>
                         <tbody>
-                            ${s.nomina.map(n => `<tr class="border-b text-sm"><td class="p-4 font-bold">${n.cargo}</td><td class="p-4 text-right text-slate-600">${formatCOP(n.valorDia)}</td><td class="p-4 text-right font-bold">${formatCOP(n.valorDia * n.dias)}</td></tr>`).join('')}
-                            <tr class="bg-blue-50/50"><td class="p-4 font-bold text-blue-900 text-sm">TOTAL NÓMINA</td><td class="p-4 font-bold text-right text-blue-700">${formatCOP(totalDiaria)} / Día</td><td class="p-4 font-black text-right text-blue-800">${formatCOP(totalViaje)}</td></tr>
+                            ${s.nomina.map(n => `<tr class="border-b text-sm hover:bg-slate-50"><td class="p-4 font-bold text-slate-700">${n.cargo}</td><td class="p-4 text-right text-slate-600">${formatCOP(n.valorDia)}</td><td class="p-4 text-right font-bold">${formatCOP(n.valorDia * n.dias)}</td></tr>`).join('')}
+                            <tr class="bg-blue-50/50"><td class="p-4 font-black text-blue-900 text-sm">TOTAL NÓMINA</td><td class="p-4 font-bold text-right text-blue-700">${formatCOP(totalDiaria)} / Día</td><td class="p-4 font-black text-right text-blue-800 text-lg">${formatCOP(totalViaje)}</td></tr>
                         </tbody>
                     </table>
                 </div>
                 <div class="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-                    <div class="p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center"><i data-lucide="receipt" class="mr-2 text-slate-500 w-5 h-5"></i> Historial de Liquidaciones</h3></div>
+                    <div class="p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800"><i data-lucide="receipt" class="mr-2 text-green-500 w-5 h-5"></i> Historial de Liquidaciones</h3></div>
                     <div class="p-5 space-y-3 overflow-y-auto max-h-[400px]">
                         ${s.pagosNomina.map(p => `
-                            <div class="flex justify-between items-center p-4 border rounded-xl">
-                                <div class="flex items-center"><div class="bg-green-100 p-2 rounded-lg text-green-600 mr-4"><i data-lucide="check-circle" class="w-5 h-5"></i></div><div><p class="font-bold">${p.viaje}</p><p class="text-xs text-slate-500">Aprobado el ${p.fecha}</p></div></div>
-                                <div class="text-right"><p class="font-black">${formatCOP(p.valor)}</p><p class="text-[10px] font-bold text-green-600 uppercase mt-1">${p.estado}</p></div>
+                            <div class="flex justify-between items-center p-4 border rounded-xl hover:border-green-200 transition-colors">
+                                <div class="flex items-center"><div class="bg-green-100 p-2 rounded-lg text-green-600 mr-4"><i data-lucide="check-circle" class="w-5 h-5"></i></div><div><p class="font-bold text-slate-800">${p.viaje}</p><p class="text-xs text-slate-500 font-medium">Aprobado el ${p.fecha}</p></div></div>
+                                <div class="text-right"><p class="font-black text-slate-800">${formatCOP(p.valor)}</p><p class="text-[10px] font-bold text-green-600 uppercase mt-1 bg-green-50 inline-block px-2 py-0.5 rounded">${p.estado}</p></div>
                             </div>
                         `).join('')}
                     </div>
@@ -421,57 +461,156 @@ const App = {
     renderNIIF: () => {
         const t = App.getTotales(); const s = App.state;
         let content = '';
-        if(s.niifTab === 'estado-situacion') {
+
+        if(s.niifTab === 'informe-consolidado') {
+            content = `
+            <div class="space-y-8 print:space-y-6">
+                <div class="text-center border-b-2 border-slate-800 pb-4 mb-6">
+                    <h1 class="text-xl md:text-2xl font-black uppercase text-slate-900">Informe de Gestión Operativa y Financiera Consolidado</h1>
+                    <h2 class="text-lg font-bold text-slate-700">Empresa: Transporte Marítimo y Fluvial Don Sebe - M/N Greicy Jireth</h2>
+                    <p class="text-sm font-semibold text-slate-500 mt-2">Cruce de Datos: Ingresos vs Cartera vs Utilidad Real</p>
+                </div>
+
+                <div class="bg-white border rounded-xl overflow-hidden shadow-sm">
+                    <div class="bg-slate-800 text-white p-3 font-bold text-sm uppercase">1. Comparativo de Ingresos y Utilidades (Agrupado por Periodo)</div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm border-collapse min-w-[700px]">
+                            <thead>
+                                <tr class="bg-slate-100 text-slate-600 border-b">
+                                    <th class="p-3 font-bold border-r">Periodo / Mes</th>
+                                    <th class="p-3 font-bold text-right border-r">Ingreso Proyectado</th>
+                                    <th class="p-3 font-bold text-right border-r">Ingreso Real</th>
+                                    <th class="p-3 font-bold text-right border-r">Utilidad Proyectada</th>
+                                    <th class="p-3 font-bold text-right text-green-700 border-r">Utilidad Real</th>
+                                    <th class="p-3 font-bold text-right text-orange-600">Cartera Acumulada</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="bg-blue-50/50 border-b font-black text-slate-800">
+                                    <td class="p-3 border-r">PERIODO 1 (Total)</td>
+                                    <td class="p-3 text-right border-r">${formatCOP(296561210)}</td>
+                                    <td class="p-3 text-right border-r">${formatCOP(186146710)}</td>
+                                    <td class="p-3 text-right border-r">${formatCOP(112209000)}</td>
+                                    <td class="p-3 text-right text-green-700 border-r">${formatCOP(88714000)}</td>
+                                    <td class="p-3 text-right text-orange-600">${formatCOP(110414500)}</td>
+                                </tr>
+                                ${s.informePeriodos.map(p => `
+                                <tr class="border-b hover:bg-slate-50">
+                                    <td class="p-3 border-r font-medium">${p.periodo}</td>
+                                    <td class="p-3 text-right border-r">${formatCOP(p.ingresoProy)}</td>
+                                    <td class="p-3 text-right border-r">${formatCOP(p.ingresoReal)}</td>
+                                    <td class="p-3 text-right border-r">${formatCOP(p.utilProy)}</td>
+                                    <td class="p-3 text-right font-bold text-green-700 border-r">${formatCOP(p.utilReal)}</td>
+                                    <td class="p-3 text-right font-bold text-orange-600">${formatCOP(p.cartera)}</td>
+                                </tr>`).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                    <div class="bg-red-50 border border-red-100 rounded-xl p-5 shadow-sm">
+                        <h3 class="font-black text-red-800 mb-3 flex items-center"><i data-lucide="alert-triangle" class="w-5 h-5 mr-2"></i> Estado de Cartera</h3>
+                        <p class="text-sm text-red-900 mb-2">El <strong>89.5%</strong> de la deuda se originó en el Periodo 1. La cartera se concentra principalmente en tres clientes clave:</p>
+                        <ul class="list-disc list-inside text-sm font-bold text-red-800 ml-2 space-y-1">
+                            <li>Alex (${formatCOP(31400000)})</li>
+                            <li>John Jairo Silva (${formatCOP(41300000)})</li>
+                            <li>Oscar (${formatCOP(31704500)})</li>
+                        </ul>
+                    </div>
+
+                    <div class="bg-blue-50 border border-blue-100 rounded-xl p-5 shadow-sm">
+                        <h3 class="font-black text-blue-900 mb-3 flex items-center"><i data-lucide="info" class="w-5 h-5 mr-2"></i> Conclusión Socio 40% (PRI)</h3>
+                        <div class="space-y-2 text-sm text-blue-900">
+                            <div class="flex justify-between border-b border-blue-200 pb-1"><span>Utilidad a Favor:</span><span class="font-bold text-green-700">+ ${formatCOP(69689184)}</span></div>
+                            <div class="flex justify-between border-b border-blue-200 pb-1"><span>Deuda Mantenimiento:</span><span class="font-bold text-red-600">- ${formatCOP(81900472)}</span></div>
+                            <div class="flex justify-between pt-1 font-black text-base"><span>Saldo Resultante:</span><span class="text-red-700">${formatCOP(-12211288)}</span></div>
+                        </div>
+                        <p class="text-xs text-blue-800 mt-3 italic">Nota: El socio no tiene utilidades disponibles para retiro. El saldo negativo será cubierto con recaudo futuro de cartera o utilidades de próximos viajes (abril-mayo 2026).</p>
+                    </div>
+                </div>
+            </div>`;
+        } 
+        else if(s.niifTab === 'estado-situacion') {
             content = `<div class="grid md:grid-cols-2 gap-8">
-                <div><h4 class="font-black mb-3 bg-slate-50 p-2 rounded">ACTIVOS</h4><div class="flex justify-between text-sm py-1"><span>Efectivo (Caja)</span><span>${formatCOP(t.utilidadNeta - t.carteraTotal)}</span></div><div class="flex justify-between text-sm py-1"><span>Cuentas por Cobrar</span><span>${formatCOP(t.carteraTotal)}</span></div><div class="flex justify-between font-bold pt-2 border-t"><span>TOTAL ACTIVOS</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
-                <div><h4 class="font-black mb-3 bg-slate-50 p-2 rounded">PASIVOS Y PATRIMONIO</h4><div class="flex justify-between text-sm py-1"><span>Pasivos (CxP Mantenimiento)</span><span>${formatCOP(12211288)}</span></div><div class="flex justify-between text-sm py-1"><span>Capital Social</span><span>${formatCOP(t.inversionTotal)}</span></div><div class="flex justify-between text-sm py-1"><span>Utilidades Retenidas</span><span>${formatCOP(t.utilidadNeta - 12211288)}</span></div><div class="flex justify-between font-black text-blue-700 pt-2 border-t"><span>TOTAL PAS. + PAT.</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
+                <div><h4 class="font-black mb-3 bg-slate-50 border border-slate-200 p-3 rounded-lg text-slate-800">ACTIVOS CORRIENTES Y NO CORRIENTES</h4><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Efectivo y Equivalentes (Caja)</span><span class="font-medium">${formatCOP(t.utilidadNeta - t.carteraTotal)}</span></div><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Cuentas Comerciales por Cobrar</span><span class="font-medium">${formatCOP(t.carteraTotal)}</span></div><div class="flex justify-between font-black text-lg pt-3 mt-1"><span>TOTAL ACTIVOS</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
+                <div><h4 class="font-black mb-3 bg-slate-50 border border-slate-200 p-3 rounded-lg text-slate-800">PASIVOS Y PATRIMONIO</h4><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Cuentas por Pagar (Mantenimiento PRI)</span><span class="font-medium">${formatCOP(81900472)}</span></div><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Capital Social Suscrito</span><span class="font-medium">${formatCOP(t.inversionTotal)}</span></div><div class="flex justify-between text-sm py-2 border-b border-slate-100"><span>Utilidades Retenidas del Ejercicio</span><span class="font-medium">${formatCOP(t.utilidadNeta - 81900472)}</span></div><div class="flex justify-between font-black text-lg text-blue-700 pt-3 mt-1"><span>TOTAL PAS. + PAT.</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div></div>
             </div>`;
         } else if (s.niifTab === 'resultados') {
-            content = `<div class="space-y-3 text-sm max-w-2xl mx-auto">
-                <div class="flex justify-between font-bold bg-slate-50 p-2 rounded"><span>Ingresos Ordinarios</span><span>${formatCOP(t.ingresoTotal)}</span></div><div class="flex justify-between px-2"><span>(-) Costos de Operación</span><span class="text-red-500">-${formatCOP(t.gastoTotal * 0.7)}</span></div><div class="flex justify-between px-2"><span>(-) Costos Laborales</span><span class="text-red-500">-${formatCOP(t.gastoTotal * 0.3)}</span></div><div class="flex justify-between font-black text-xl text-green-600 pt-4 border-t border-green-200 mt-2"><span>UTILIDAD NETA</span><span>${formatCOP(t.utilidadNeta)}</span></div>
+            content = `<div class="space-y-4 text-sm max-w-3xl mx-auto">
+                <div class="flex justify-between items-center font-bold bg-slate-50 border border-slate-200 p-3 rounded-lg"><span class="text-base text-slate-800">Ingresos de Actividades Ordinarias</span><span class="text-lg">${formatCOP(t.ingresoTotal)}</span></div>
+                <div class="flex justify-between items-center px-3 py-1"><span>(-) Costos Directos de Operación (Combustible, Insumos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.7)}</span></div>
+                <div class="flex justify-between items-center px-3 py-1 border-b border-slate-200 pb-3"><span>(-) Gastos de Personal (Nómina y Viáticos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.3)}</span></div>
+                <div class="flex justify-between items-center px-3 py-2 font-bold bg-green-50/50 rounded-lg"><span class="text-slate-800">Utilidad Bruta Operacional</span><span class="text-green-700">${formatCOP(t.utilidadBruta)}</span></div>
+                <div class="flex justify-between items-center font-black text-2xl text-green-600 pt-6 mt-4 border-t-2 border-green-200"><span class="uppercase tracking-tight">UTILIDAD NETA DEL PERIODO</span><span>${formatCOP(t.utilidadNeta)}</span></div>
             </div>`;
         }
 
-        return `<div class="space-y-6 animate-fade-in"><h2 class="text-2xl font-black flex items-center"><i data-lucide="landmark" class="mr-2 text-blue-600 w-6 h-6"></i> Módulo Financiero NIIF</h2><div class="flex space-x-2 overflow-x-auto hide-scroll pb-2">${['estado-situacion', 'resultados'].map(tab => `<button onclick="App.setNiifTab('${tab}')" class="px-4 py-2 rounded-lg text-sm font-bold border ${s.niifTab === tab ? 'bg-slate-800 text-white' : 'bg-white hover:bg-slate-50'}">${tab.replace('-', ' ').toUpperCase()}</button>`).join('')}</div><div class="bg-white rounded-2xl shadow-sm border p-6 min-h-[300px]">${content}</div></div>`;
+        return `
+        <div class="space-y-6 animate-fade-in print:hidden">
+            <h2 class="text-2xl font-black flex items-center text-slate-800"><i data-lucide="landmark" class="mr-2 text-blue-600 w-6 h-6"></i> Módulo Financiero e Informes</h2>
+            <div class="flex space-x-2 overflow-x-auto hide-scroll pb-2">
+                ${['informe-consolidado', 'estado-situacion', 'resultados'].map(tab => `
+                    <button onclick="App.setNiifTab('${tab}')" class="px-5 py-2.5 rounded-xl text-sm font-bold border transition-colors shadow-sm ${s.niifTab === tab ? 'bg-slate-800 text-white border-slate-900' : 'bg-white hover:bg-slate-50 text-slate-600'}">${tab.replace('-', ' ').toUpperCase()}</button>
+                `).join('')}
+            </div>
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-[400px]">
+                ${content}
+            </div>
+        </div>
+        ${s.niifTab === 'informe-consolidado' ? `<div class="hidden print:block">${content}</div>` : ''}`;
     },
 
     renderSociedad: () => {
         const s = App.state;
-        const meses = [...new Set(s.viajes.map(v => v.fecha.substring(0, 7)))].sort();
-        const vFiltro = s.sociedadFiltroMes === 'Todos' ? s.viajes : s.viajes.filter(v => v.fecha.startsWith(s.sociedadFiltroMes));
-        const utilidadPeriodo = vFiltro.reduce((acc, v) => acc + (v.ingreso - v.gastos), 0);
+        const periodos = [...new Set(s.viajes.map(v => v.periodo))].sort();
+        const vFiltro = s.sociedadFiltroMes === 'Todos' ? s.viajes : s.viajes.filter(v => v.periodo === s.sociedadFiltroMes);
+        const utilidadPeriodo = vFiltro.reduce((acc, v) => acc + v.utilidadBruta, 0); // Utilidad a repartir
 
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
             <div class="flex justify-between items-center">
-                <div><h2 class="text-2xl font-bold">Participación Societaria</h2></div>
-                <div class="flex items-center space-x-2"><span class="text-sm font-bold">Periodo:</span>
-                    <select onchange="App.setFilterVal('sociedadFiltroMes', this.value)" class="border rounded-lg p-2 text-sm bg-white"><option value="Todos" ${s.sociedadFiltroMes==='Todos'?'selected':''}>Histórico Total</option>${meses.map(m => `<option value="${m}" ${s.sociedadFiltroMes===m?'selected':''}>Mes: ${m}</option>`).join('')}</select>
+                <div><h2 class="text-2xl font-bold">Participación Societaria y Cruce de Cuentas</h2></div>
+                <div class="flex items-center space-x-2"><span class="text-sm font-bold text-slate-600">Periodo:</span>
+                    <select onchange="App.setFilterVal('sociedadFiltroMes', this.value)" class="border border-slate-300 shadow-sm rounded-lg p-2.5 text-sm bg-white font-medium focus:ring focus:ring-blue-200">
+                        <option value="Todos" ${s.sociedadFiltroMes==='Todos'?'selected':''}>Histórico Total (Consolidado)</option>
+                        ${periodos.map(m => `<option value="${m}" ${s.sociedadFiltroMes===m?'selected':''}>${m}</option>`).join('')}
+                    </select>
                 </div>
             </div>
-            <div class="bg-blue-50 border border-blue-100 p-4 rounded-xl flex justify-between items-center shadow-sm"><span class="text-blue-800 font-bold text-sm">Utilidad generada (${s.sociedadFiltroMes}):</span><span class="text-blue-700 font-black text-2xl">${formatCOP(utilidadPeriodo)}</span></div>
-            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
-                <table class="w-full text-left border-collapse min-w-[800px]">
-                    <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Socio</th><th class="p-4 text-center">% Part.</th><th class="p-4 text-right">Inversión Base</th><th class="p-4 text-right">Utilidad Bruta</th><th class="p-4 text-right">Deuda Mantenimiento</th><th class="p-4 text-right bg-green-50/50">Líquido a Recibir</th></tr></thead>
-                    <tbody>
-                        ${s.socios.map(socio => {
-                            const utilBruta = utilidadPeriodo * (socio.porcentaje / 100);
-                            let liquido = utilBruta;
-                            if (socio.saldoMantenimiento < 0) {
-                                const deudaAbs = Math.abs(socio.saldoMantenimiento);
-                                liquido = utilBruta >= deudaAbs ? utilBruta - deudaAbs : 0;
-                            }
-                            return `
-                            <tr class="border-b hover:bg-slate-50">
-                                <td class="p-4 flex items-center"><div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-bold mr-3">${socio.nombre.charAt(0)}</div><span class="font-bold">${socio.nombre}</span></td>
-                                <td class="p-4 text-center font-black text-blue-600">${socio.porcentaje}%</td><td class="p-4 text-right text-sm text-slate-600">${formatCOP(socio.inversion)}</td>
-                                <td class="p-4 text-right font-bold">${formatCOP(utilBruta)}</td><td class="p-4 text-right text-xs"><span class="${socio.saldoMantenimiento < 0 ? 'text-red-500 font-bold bg-red-50 px-2 py-1 rounded' : 'text-slate-400'}">${socio.saldoMantenimiento < 0 ? formatCOP(socio.saldoMantenimiento) : 'Sin deuda'}</span></td>
-                                <td class="p-4 text-right bg-green-50/30 font-black text-lg ${liquido > 0 ? 'text-green-600' : 'text-slate-400'}">${formatCOP(liquido)}</td>
-                            </tr>`;
-                        }).join('')}
-                    </tbody>
-                </table>
+            <div class="bg-blue-50 border border-blue-200 p-5 rounded-2xl flex justify-between items-center shadow-sm">
+                <span class="text-blue-900 font-bold">Total Utilidad a Repartir (${s.sociedadFiltroMes}):</span>
+                <span class="text-blue-700 font-black text-3xl">${formatCOP(utilidadPeriodo)}</span>
             </div>
+            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse min-w-[900px]">
+                        <thead><tr class="bg-slate-800 border-b text-white text-xs uppercase font-bold"><th class="p-4">Socio Inversionista</th><th class="p-4 text-center">% Part.</th><th class="p-4 text-right">Inversión Base</th><th class="p-4 text-right">Utilidad Causada</th><th class="p-4 text-right">Deuda Mantenimiento</th><th class="p-4 text-right bg-green-600">Saldo Líquido Actual</th></tr></thead>
+                        <tbody>
+                            ${s.socios.map(socio => {
+                                // Calculo dinámico según filtro
+                                const utilBruta = s.sociedadFiltroMes === 'Todos' ? socio.utilidadCausada : utilidadPeriodo * (socio.porcentaje / 100);
+                                let liquido = utilBruta;
+                                if (socio.saldoMantenimiento < 0 && s.sociedadFiltroMes === 'Todos') {
+                                    const deudaAbs = Math.abs(socio.saldoMantenimiento);
+                                    liquido = utilBruta - deudaAbs; // Permite mostrar saldo negativo real para PRI
+                                }
+                                
+                                return `
+                                <tr class="border-b hover:bg-slate-50 transition-colors">
+                                    <td class="p-4 flex items-center"><div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-600 mr-3 shadow-sm border">${socio.nombre.charAt(0)}</div><span class="font-bold text-slate-800">${socio.nombre}</span></td>
+                                    <td class="p-4 text-center font-black text-blue-600 bg-blue-50/30">${socio.porcentaje}%</td>
+                                    <td class="p-4 text-right text-sm font-medium text-slate-600">${formatCOP(socio.inversion)}</td>
+                                    <td class="p-4 text-right font-bold text-slate-700">${formatCOP(utilBruta)}</td>
+                                    <td class="p-4 text-right text-xs"><span class="${socio.saldoMantenimiento < 0 ? 'text-red-600 font-black bg-red-50 border border-red-100 px-2 py-1.5 rounded-lg shadow-sm' : 'text-slate-400 font-medium'}">${socio.saldoMantenimiento < 0 ? formatCOP(socio.saldoMantenimiento) : 'A Paz y Salvo'}</span></td>
+                                    <td class="p-4 text-right bg-green-50/50 font-black text-lg ${liquido > 0 ? 'text-green-600' : (liquido < 0 ? 'text-red-600' : 'text-slate-400')}">${formatCOP(liquido)}</td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            ${s.sociedadFiltroMes === 'Todos' ? `<p class="text-xs text-slate-500 italic mt-2"><i data-lucide="info" class="w-3 h-3 inline"></i> Nota: El saldo líquido en rojo indica una deuda del socio hacia la empresa que deberá cruzarse con futuras utilidades.</p>` : ''}
         </div>`;
     },
 
@@ -479,27 +618,79 @@ const App = {
         let h = ''; const s = App.state;
 
         // Modal Form Viaje
-        if (s.isAddViajeOpen) h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50"><div class="bg-white w-full max-w-md rounded-2xl p-6 animate-slide-up"><div class="flex justify-between mb-4"><h3 class="font-bold text-xl">Registrar Viaje</h3><button onclick="App.closeModals()"><i data-lucide="x"></i></button></div><form onsubmit="App.submitViaje(event)" class="space-y-3"><input name="fecha" type="date" required class="w-full border p-2 rounded-lg text-sm"/><input name="ruta" type="text" placeholder="Ruta" required class="w-full border p-2 rounded-lg text-sm"/><input name="ingreso" type="number" placeholder="Ingreso Bruto" required class="w-full border p-2 rounded-lg text-sm"/><input name="gastos" type="number" placeholder="Gastos Operativos" required class="w-full border p-2 rounded-lg text-sm"/><input name="cartera" type="number" placeholder="Monto a Cartera" class="w-full border p-2 rounded-lg text-sm"/><textarea name="observaciones" placeholder="Observaciones" class="w-full border p-2 rounded-lg text-sm"></textarea><button type="submit" class="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800">Guardar</button></form></div></div>`;
+        if (s.isAddViajeOpen) h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"><div class="bg-white w-full max-w-md rounded-2xl p-6 animate-slide-up shadow-2xl"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Registrar Viaje Operativo</h3><button onclick="App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="App.submitViaje(event)" class="space-y-4"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Fecha de Cierre</label><input name="fecha" type="date" required class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Ruta</label><input name="ruta" type="text" placeholder="Ej: B/tura - Charco" required class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="grid grid-cols-2 gap-4"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Ingreso Bruto ($)</label><input name="ingreso" type="number" placeholder="Ej: 80000000" required class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Gastos Operativos ($)</label><input name="gastos" type="number" placeholder="Ej: 22000000" required class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Monto a Cartera (Deuda)</label><input name="cartera" type="number" placeholder="Si todo se pagó, deja 0" class="w-full border-2 border-orange-200 bg-orange-50 p-2.5 rounded-xl text-sm focus:border-orange-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Observaciones</label><textarea name="observaciones" placeholder="Detalles de la carga, responsables, etc." class="w-full border-2 border-slate-200 p-2.5 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors h-20 resize-none"></textarea></div><button type="submit" class="w-full bg-blue-600 text-white font-black py-3.5 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all mt-2">Guardar Registro Consolidado</button></form></div></div>`;
         
         // Modal Form Cliente
-        if (s.isAddClienteOpen) h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50"><div class="bg-white w-full max-w-md rounded-2xl p-6 animate-slide-up"><div class="flex justify-between mb-4"><h3 class="font-bold text-xl">Registrar Cliente</h3><button onclick="App.closeModals()"><i data-lucide="x"></i></button></div><form onsubmit="App.submitCliente(event)" class="space-y-3"><input name="nombre" type="text" placeholder="Nombre Comercial / Contacto" required class="w-full border p-2 rounded-lg text-sm"/><input name="telefono" type="text" placeholder="Teléfono" required class="w-full border p-2 rounded-lg text-sm"/><input name="ubicacion" type="text" placeholder="Ubicación" required class="w-full border p-2 rounded-lg text-sm"/><select name="tipo" class="w-full border p-2 rounded-lg text-sm"><option>Comerciante de Madera</option><option>Materiales Construcción</option><option>Equipos e Insumos</option><option>General</option></select><button type="submit" class="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800">Guardar Cliente</button></form></div></div>`;
+        if (s.isAddClienteOpen) h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"><div class="bg-white w-full max-w-md rounded-2xl p-6 animate-slide-up shadow-2xl"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Registrar Cliente</h3><button onclick="App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="App.submitCliente(event)" class="space-y-4"><input name="nombre" type="text" placeholder="Nombre Comercial / Contacto" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="telefono" type="text" placeholder="Teléfono" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="ubicacion" type="text" placeholder="Ubicación" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><select name="tipo" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option>Comerciante de Madera</option><option>Materiales Construcción</option><option>Equipos e Insumos</option><option>General</option></select><button type="submit" class="w-full bg-slate-900 text-white font-black py-3.5 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Guardar Cliente en Directorio</button></form></div></div>`;
         
         // Modal Form Nómina
         if (s.isAddNominaOpen) {
             const tN = formatCOP(s.nomina.reduce((a, c) => a + (c.valorDia * c.dias), 0));
-            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50"><div class="bg-white w-full max-w-sm rounded-2xl p-6 animate-slide-up"><div class="flex justify-between mb-4"><h3 class="font-bold text-xl">Liquidar Viaje</h3><button onclick="App.closeModals()"><i data-lucide="x"></i></button></div><form onsubmit="App.submitNomina(event)" class="space-y-3"><input name="fecha" type="date" required class="w-full border p-2 rounded-lg text-sm"/><select name="viaje" required class="w-full border p-2 rounded-lg text-sm bg-white"><option value="">Seleccione Viaje</option>${s.viajes.map(v => `<option value="${v.viaje}">${v.viaje}</option>`).join('')}</select><div class="bg-blue-50 p-4 rounded-xl text-center mt-4"><p class="text-xs font-bold text-blue-800 uppercase">Total a Liquidar</p><p class="text-2xl font-black text-blue-600">${tN}</p></div><button type="submit" class="w-full bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800">Confirmar</button></form></div></div>`;
+            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"><div class="bg-white w-full max-w-sm rounded-2xl p-6 animate-slide-up shadow-2xl"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Liquidar Viaje</h3><button onclick="App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="App.submitNomina(event)" class="space-y-4"><input name="fecha" type="date" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><select name="viaje" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="">Seleccione Viaje a Liquidar</option>${s.viajes.map(v => `<option value="${v.viaje}">${v.viaje} (${v.periodo})</option>`).join('')}</select><div class="bg-blue-50 border border-blue-100 p-5 rounded-xl text-center mt-6 shadow-inner"><p class="text-xs font-bold text-blue-800 uppercase tracking-widest mb-1">Total a Liquidar</p><p class="text-3xl font-black text-blue-600 drop-shadow-sm">${tN}</p></div><button type="submit" class="w-full bg-slate-900 text-white font-black py-3.5 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-4">Confirmar y Guardar</button></form></div></div>`;
         }
 
         // Modal Detalle Viaje
         if (s.selectedViaje) {
             const v = s.selectedViaje;
-            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50" onclick="App.closeModals()"><div class="bg-white w-full max-w-sm rounded-2xl overflow-hidden animate-slide-up" onclick="event.stopPropagation()"><div class="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 class="font-bold">${v.viaje}</h3><button onclick="App.closeModals()"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-5 space-y-4"><div class="flex justify-between"><span class="text-sm text-slate-500">Ruta</span><span class="font-bold">${v.ruta}</span></div><div class="grid grid-cols-2 gap-3"><div class="bg-green-50 p-3 rounded-lg"><p class="text-xs text-green-700 font-bold">Ingresos</p><p class="font-black">${formatCOP(v.ingreso)}</p></div><div class="bg-red-50 p-3 rounded-lg"><p class="text-xs text-red-700 font-bold">Gastos</p><p class="font-black">${formatCOP(v.gastos)}</p></div></div><div class="bg-slate-50 p-3 rounded-lg flex justify-between"><span class="font-bold">Utilidad</span><span class="font-black text-blue-600">${formatCOP(v.ingreso - v.gastos)}</span></div></div></div></div>`;
+            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4" onclick="App.closeModals()">
+                <div class="bg-white w-full max-w-md rounded-3xl overflow-hidden animate-slide-up shadow-2xl" onclick="event.stopPropagation()">
+                    <div class="p-5 border-b bg-slate-50 flex justify-between items-center">
+                        <div><h3 class="font-black text-xl text-slate-800">${v.viaje}</h3><p class="text-xs font-bold text-slate-500 uppercase">${v.periodo} • ${v.fecha}</p></div>
+                        <button onclick="App.closeModals()" class="bg-slate-200 p-2 rounded-full text-slate-500 hover:bg-slate-300 transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <div class="p-6 space-y-5">
+                        <div class="flex justify-between items-center border-b border-slate-100 pb-4"><span class="text-sm font-bold text-slate-500 uppercase">Ruta</span><span class="font-black text-slate-800 bg-slate-100 px-3 py-1 rounded-lg">${v.ruta}</span></div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-blue-50 p-4 rounded-2xl border border-blue-100"><p class="text-xs text-blue-700 font-bold uppercase mb-1">Ingreso Bruto</p><p class="font-black text-lg text-blue-900">${formatCOP(v.ingreso)}</p></div>
+                            <div class="bg-red-50 p-4 rounded-2xl border border-red-100"><p class="text-xs text-red-700 font-bold uppercase mb-1">Costos Operativos</p><p class="font-black text-lg text-red-900">${formatCOP(v.gastos)}</p></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="bg-green-50 p-4 rounded-2xl border border-green-100"><p class="text-xs text-green-700 font-bold uppercase mb-1">Utilidad Bruta</p><p class="font-black text-lg text-green-900">${formatCOP(v.utilidadBruta)}</p></div>
+                            <div class="bg-orange-50 p-4 rounded-2xl border border-orange-100"><p class="text-xs text-orange-700 font-bold uppercase mb-1">Cuentas x Cobrar</p><p class="font-black text-lg text-orange-900">${formatCOP(v.cartera)}</p></div>
+                        </div>
+                        <div class="bg-slate-800 p-4 rounded-2xl flex justify-between items-center shadow-inner">
+                            <span class="font-bold text-slate-300 text-sm uppercase tracking-wide">Ingreso Recaudado</span>
+                            <span class="font-black text-2xl text-white">${formatCOP(v.ingresoRecaudado)}</span>
+                        </div>
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 text-sm">
+                            <p class="font-bold text-slate-700 mb-1 flex items-center"><i data-lucide="file-text" class="w-4 h-4 mr-1"></i> Observaciones Generales</p>
+                            <p class="text-slate-600">${v.observaciones}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
         }
 
         // Modal Detalle Cliente (Cartera)
         if (s.selectedCliente) {
             const c = s.selectedCliente;
-            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50" onclick="App.closeModals()"><div class="bg-white w-full max-w-md rounded-2xl overflow-hidden animate-slide-up" onclick="event.stopPropagation()"><div class="p-4 border-b bg-slate-50 flex justify-between items-center"><h3 class="font-bold text-lg"><i data-lucide="users" class="w-5 h-5 inline mr-1 text-blue-600"></i> ${c.cliente}</h3><button onclick="App.closeModals()"><i data-lucide="x" class="w-5 h-5"></i></button></div><div class="p-5"><div class="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center mb-4"><p class="text-sm text-orange-800 font-bold mb-1">Deuda Total Consolidada</p><p class="text-3xl font-black text-orange-600">${formatCOP(c.valorTotal)}</p></div><button class="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800">Registrar Abono a ${c.cliente}</button></div></div></div>`;
+            const viajesDeuda = s.carteraViajes.filter(cv => cv.cliente.includes(c.cliente));
+            h += `<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4" onclick="App.closeModals()">
+                <div class="bg-white w-full max-w-md rounded-3xl overflow-hidden animate-slide-up shadow-2xl" onclick="event.stopPropagation()">
+                    <div class="p-5 border-b bg-slate-50 flex justify-between items-center">
+                        <h3 class="font-black text-xl text-slate-800 flex items-center"><i data-lucide="user" class="w-6 h-6 mr-2 text-blue-600 bg-blue-100 p-1 rounded-md"></i> ${c.cliente}</h3>
+                        <button onclick="App.closeModals()" class="bg-slate-200 p-2 rounded-full text-slate-500 hover:bg-slate-300 transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    <div class="p-6">
+                        <div class="bg-orange-50 p-6 rounded-2xl border border-orange-200 text-center mb-6 shadow-inner">
+                            <p class="text-xs text-orange-800 font-bold uppercase tracking-widest mb-2">Deuda Total Consolidada</p>
+                            <p class="text-4xl font-black text-orange-600 drop-shadow-sm">${formatCOP(c.valorTotal)}</p>
+                        </div>
+                        <h4 class="font-bold text-slate-800 mb-3 text-sm flex items-center"><i data-lucide="list" class="w-4 h-4 mr-1 text-slate-400"></i> Detalle de Facturas/Viajes</h4>
+                        <div class="space-y-2 mb-6 max-h-40 overflow-y-auto pr-2">
+                            ${viajesDeuda.map(vd => `
+                                <div class="bg-slate-50 border border-slate-100 p-3 rounded-xl flex justify-between items-center">
+                                    <div><p class="font-bold text-slate-700 text-sm">${vd.viaje}</p><p class="text-xs text-slate-500">${vd.concepto}</p></div>
+                                    <span class="font-black text-orange-600">${formatCOP(vd.valor)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <button class="w-full bg-slate-900 text-white py-4 rounded-xl font-black text-lg hover:bg-slate-800 shadow-lg shadow-slate-900/20 transition-all flex items-center justify-center">
+                            <i data-lucide="check-circle-2" class="w-5 h-5 mr-2"></i> Registrar Abono o Pago Total
+                        </button>
+                    </div>
+                </div>
+            </div>`;
         }
 
         return h;
@@ -524,21 +715,21 @@ const App = {
         // Estructura Base Global
         root.innerHTML = `
             ${App.renderModals()}
-            <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden">
-                <h1 class="text-xl font-black text-slate-800 flex items-center"><i data-lucide="anchor" class="mr-2 text-blue-600 w-6 h-6"></i> Don Sebe ERP</h1>
-                <div class="bg-slate-900 text-white px-3 py-1 rounded-full text-xs font-bold shadow">Modo Admin</div>
+            <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden shadow-sm">
+                <h1 class="text-xl font-black text-slate-800 flex items-center tracking-tight"><i data-lucide="anchor" class="mr-2 text-blue-600 w-6 h-6"></i> Don Sebe ERP</h1>
+                <div class="bg-slate-900 text-white px-4 py-1.5 rounded-full text-xs font-bold shadow-md flex items-center"><div class="w-2 h-2 bg-green-400 rounded-full mr-2 animate-pulse"></div> Administrador</div>
             </header>
             
-            <main class="flex-1 overflow-y-auto p-4 md:p-6 pb-20 bg-slate-50 print:bg-white print:p-0">
+            <main class="flex-1 overflow-y-auto p-4 md:p-6 pb-24 bg-slate-50 print:bg-white print:p-0">
                 <div class="max-w-6xl mx-auto">${mainContent}</div>
             </main>
 
-            <nav class="bg-white border-t border-slate-200 shrink-0 pb-safe fixed bottom-0 w-full z-40 print:hidden">
-                <div class="max-w-6xl mx-auto flex justify-between overflow-x-auto hide-scroll">
+            <nav class="bg-white border-t border-slate-200 shrink-0 pb-safe fixed bottom-0 w-full z-40 print:hidden shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)]">
+                <div class="max-w-6xl mx-auto flex justify-between overflow-x-auto hide-scroll px-2">
                     ${App.navItems.map(item => `
-                        <button onclick="App.setTab('${item.id}')" class="flex flex-col items-center p-3 min-w-[4.5rem] relative ${App.state.activeTab === item.id ? 'text-blue-600' : 'text-slate-400'}">
-                            <i data-lucide="${item.icon}" class="w-5 h-5 mb-1 ${App.state.activeTab === item.id ? 'scale-110' : ''}"></i>
-                            <span class="text-[10px] font-medium">${item.label}</span>
+                        <button onclick="App.setTab('${item.id}')" class="flex flex-col items-center p-3 min-w-[4.5rem] relative transition-colors ${App.state.activeTab === item.id ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'}">
+                            <i data-lucide="${item.icon}" class="w-5 h-5 mb-1 transition-transform ${App.state.activeTab === item.id ? 'scale-110' : ''}"></i>
+                            <span class="text-[10px] font-bold">${item.label}</span>
                             ${App.state.activeTab === item.id ? '<div class="absolute top-0 w-8 h-1 bg-blue-600 rounded-b-full"></div>' : ''}
                         </button>
                     `).join('')}
@@ -548,16 +739,51 @@ const App = {
 
         lucide.createIcons();
 
-        // Renderizado gráfico en Dashboard
+        // Renderizado gráfico Avanzado en Dashboard
         if(App.state.activeTab === 'dashboard') {
             const ctx = document.getElementById('lineChart');
             if(ctx) {
-                const chartData = { labels: ['Oct', 'Nov', 'Dic'], ingresos: [66956000, 119571300, 114843500], gastos: [29107000, 45211300, 38800000]};
+                // Extrayendo datos de la simulación de periodos para la gráfica
+                const s = App.state;
+                const labels = s.informePeriodos.map(p => p.periodo.split(' ')[0]); // Oct-Nov, Diciembre, Enero
+                const ingresosBrutos = s.informePeriodos.map(p => p.ingresoProy); 
+                const utilidadesBrutas = s.informePeriodos.map(p => p.utilProy);
+                const utilidadesNetas = s.informePeriodos.map(p => p.utilReal); // Recaudadas
+                const costos = s.informePeriodos.map(p => p.ingresoProy - p.utilProy); // Estimación matemática basada en proyecciones
+
                 if(window.dashChart) window.dashChart.destroy();
                 window.dashChart = new Chart(ctx, {
                     type: 'line',
-                    data: { labels: chartData.labels, datasets: [{ label: 'Ingresos', data: chartData.ingresos, borderColor: '#3b82f6', tension: 0.4, borderWidth: 3 }, { label: 'Gastos', data: chartData.gastos, borderColor: '#ef4444', tension: 0.4, borderWidth: 3 }]},
-                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { display: false } } }
+                    data: { 
+                        labels: labels, 
+                        datasets: [
+                            { label: 'Ingresos Brutos', data: ingresosBrutos, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4, borderWidth: 3, fill: true }, 
+                            { label: 'Costos (Gastos)', data: costos, borderColor: '#ef4444', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, borderDash: [5, 5] },
+                            { label: 'Utilidades Brutas', data: utilidadesBrutas, borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2 },
+                            { label: 'Utilidades Netas (Recaudo Real)', data: utilidadesNetas, borderColor: '#0f766e', backgroundColor: 'rgba(15, 118, 110, 0.1)', tension: 0.4, borderWidth: 4, fill: true }
+                        ]
+                    },
+                    options: { 
+                        responsive: true, 
+                        maintainAspectRatio: false, 
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: { 
+                            legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8, font: { weight: 'bold' } } },
+                            tooltip: { callbacks: { label: function(context) { return context.dataset.label + ': ' + formatCOP(context.parsed.y); } } }
+                        }, 
+                        scales: { 
+                            y: { 
+                                beginAtZero: true, 
+                                grid: { color: '#f1f5f9' },
+                                ticks: { 
+                                    font: { weight: 'bold' },
+                                    color: '#94a3b8',
+                                    callback: function(value) { return '$' + (value / 1000000) + 'M'; } 
+                                } 
+                            },
+                            x: { grid: { display: false }, ticks: { font: { weight: 'bold' }, color: '#64748b' } }
+                        } 
+                    }
                 });
             }
         }
