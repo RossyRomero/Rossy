@@ -50,15 +50,15 @@
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 /**
  * ==========================================
- * 1. CONFIGURACIÓN FIREBASE (MODULAR - SIN OCULTAMIENTO)
+ * 1. CONFIGURACIÓN FIREBASE (DINÁMICA DE ENTORNO)
  * ==========================================
  */
-const firebaseConfig = {
+const fallbackConfig = {
     apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
     authDomain: "nexus-jr.firebaseapp.com",
     projectId: "nexus-jr",
@@ -71,12 +71,14 @@ let auth = null;
 let db = null;
 window.isFirebaseReady = false;
 let currentUser = null;
-const appIdStr = "don-sebe-erp";
 window.activeFirebaseListeners = [];
 window.hasLoadedFromCloud = {}; // PARCHE: Bóveda protectora para evitar que la UI quede en blanco
 
-// Inicialización Segura
+const appIdStr = typeof __app_id !== 'undefined' ? __app_id : "don-sebe-erp";
+
+// Inicialización Segura Dinámica
 try {
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     db = getFirestore(app);
@@ -103,11 +105,35 @@ window.dbHelper = {
                 await setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()), data, { merge: true });
             } catch(e) {
                 console.warn("Fallo escritura en vivo. Encolando delta...", e);
-                if(!App.state.syncQueue.find(x => x.colName === colName && x.id === id)) App.state.syncQueue.push({colName, id, data});
+                if(!App.state.syncQueue.find(x => x.type === 'single' && x.colName === colName && x.id === id)) App.state.syncQueue.push({type: 'single', colName, id, data});
             }
         } else {
-            // Si está offline, se mete en la fila de Auto-Guardado
-            if(!App.state.syncQueue.find(x => x.colName === colName && x.id === id)) App.state.syncQueue.push({colName, id, data});
+            if(!App.state.syncQueue.find(x => x.type === 'single' && x.colName === colName && x.id === id)) App.state.syncQueue.push({type: 'single', colName, id, data});
+        }
+        window.App.render();
+    },
+    saveBatch: async (operations) => {
+        // CORRECCIÓN ATÓMICA: Transacciones múltiples (Viajes, Nómina, Transferencias)
+        operations.forEach(op => {
+            const idx = App.state[op.colName].findIndex(x => x.id === op.id);
+            if(idx !== -1) App.state[op.colName][idx] = { ...App.state[op.colName][idx], ...op.data };
+            else App.state[op.colName].push({ id: op.id, ...op.data });
+        });
+
+        if (window.isFirebaseReady && currentUser && navigator.onLine) {
+            try {
+                const batch = writeBatch(db);
+                operations.forEach(op => {
+                    const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
+                    batch.set(ref, op.data, { merge: true });
+                });
+                await batch.commit();
+            } catch(e) {
+                console.warn("Fallo en Batch. Encolando lote atómico...");
+                App.state.syncQueue.push({ type: 'batch', operations });
+            }
+        } else {
+            App.state.syncQueue.push({ type: 'batch', operations });
         }
         window.App.render();
     },
@@ -121,60 +147,20 @@ window.dbHelper = {
     }
 };
 
-window.formatCOP = (value) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value || 0);
+const copFormatter = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 });
+window.formatCOP = (value) => copFormatter.format(value || 0);
 window.parseCOP = (valueStr) => Number(valueStr.replace(/[^0-9.-]+/g,""));
 
 /**
  * ==========================================
- * 3. DATOS SEMILLA (BACKUP PARA MIGRACIÓN Y LOCAL)
- * ==========================================
- */
-const SEED_DATA = {
-    cuentas: [
-        { id: 1, nombre: 'Banco Agrario Principal', tipo: 'banco', saldoInicial: 10000000, numero: '123-456-789' },
-        { id: 2, nombre: 'Caja Fuerte (Barco)', tipo: 'caja', saldoInicial: 5000000, numero: 'Efectivo' },
-        { id: 3, nombre: 'Caja Menor Operativa', tipo: 'caja_menor', saldoInicial: 1500000, numero: 'Efectivo' }
-    ],
-    transacciones: [
-        { id: 1, cuentaId: 1, tipo: 'ingreso', monto: 10000000, fecha: '2025-10-01', concepto: 'Apertura Inicial Banco', modulo: 'Ajuste', referencia: null },
-        { id: 2, cuentaId: 2, tipo: 'ingreso', monto: 5000000, fecha: '2025-10-01', concepto: 'Apertura Inicial Caja Fuerte', modulo: 'Ajuste', referencia: null }
-    ],
-    viajes: [
-        { id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', periodo: 'Octubre 2025', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, utilidadBruta: 37849000, cartera: 12411000, ingresoRecaudado: 54545000, observaciones: 'Madera bajada Satinga', clientesAsociados: 'Oscar, Pepe', productos: 'Madera Aserrada', pagoFlete: 54545000, pagoCargue: 2000000 },
-        { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', periodo: 'Noviembre 2025', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, utilidadBruta: 28100000, cartera: 11084000, ingresoRecaudado: 35356300, observaciones: 'Madera de exportación', clientesAsociados: 'Oscar', productos: 'Madera Fina', pagoFlete: 35356300, pagoCargue: 1500000 },
-        { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', periodo: 'Noviembre 2025', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, utilidadBruta: 46260000, cartera: 0, ingresoRecaudado: 73131000, observaciones: 'Flete completo pagado', clientesAsociados: 'Konny Hospital', productos: 'Equipos Médicos', pagoFlete: 73131000, pagoCargue: 3000000 },
-        { id: 4, fecha: '2025-12-02', viaje: 'Viaje #4', periodo: 'Diciembre 2025', ruta: 'B/tura - Charco', ingreso: 80023500, gastos: 22800000, utilidadBruta: 57223500, cartera: 32119500, ingresoRecaudado: 47904000, observaciones: 'Tubos, Grava, Varillas Tola', clientesAsociados: 'Alex, Oscar', productos: 'Material Construcción, Madera', pagoFlete: 47904000, pagoCargue: 4500000 },
-        { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', periodo: 'Diciembre 2025', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, utilidadBruta: 18820000, cartera: 0, ingresoRecaudado: 34820000, observaciones: 'Viaje Tumaco sin cartera', clientesAsociados: 'Modesto', productos: 'Víveres y Abarrotes', pagoFlete: 34820000, pagoCargue: 1200000 }
-    ],
-    clientesDir: [
-        { id: 1, nombre: 'John Jairo Silva', tipo: 'Equipos e Insumos', segmento: 'Comerciante', nit: '111111111-1', telefono: '310 000 0000', ubicacion: 'Buenaventura' },
-        { id: 2, nombre: 'Oscar', tipo: 'Comerciante de Madera', segmento: 'Persona Común', nit: '222222222', telefono: '312 000 0000', ubicacion: 'Satinga' },
-        { id: 3, nombre: 'Alex', tipo: 'Materiales Construcción', segmento: 'Comerciante', nit: '333333333-3', telefono: '315 000 0000', ubicacion: 'La Tola' },
-        { id: 4, nombre: 'Konny Hospital', tipo: 'Institucional / Salud', segmento: 'Proyecto', nit: '900000000-1', telefono: '318 000 0000', ubicacion: 'El Charco' },
-        { id: 5, nombre: 'Modesto', tipo: 'Socio / Proveedor', segmento: 'Interno', nit: 'N/A', telefono: '320 000 0000', ubicacion: 'Tumaco' }
-    ],
-    socios: [
-        { id: 1, nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -81900472, utilidadCausada: 69689184 },
-        { id: 2, nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0, utilidadCausada: 67946954 },
-        { id: 3, nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0, utilidadCausada: 26133444 },
-        { id: 4, nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0, utilidadCausada: 3867751 },
-        { id: 5, nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0, utilidadCausada: 3379991 },
-        { id: 6, nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0, utilidadCausada: 2961849 }
-    ],
-    pagosNomina: [
-        { id: 1, fecha: '2025-10-30', viaje: 'Viaje #1', valor: 3200000, estado: 'Pagado', detalle: 'Toda la tripulación (5 días)', extra: 'Productos: Madera' }
-    ]
-};
-
-/**
- * ==========================================
- * 4. STATE MANAGEMENT Y ARQUITECTURA
+ * 3. STATE MANAGEMENT Y ARQUITECTURA (DB LIMPIA)
  * ==========================================
  */
 const App = {
     state: {
         activeTab: 'dashboard', niifTab: 'estado-situacion', docTab: 'escaner',
         uploadSuccess: false, isFabOpen: false, isSyncingData: false,
+        carteraViajeFiltro: 'Todos',
         syncQueue: [], // NUEVA BÓVEDA: Guarda solo las mutaciones offline pendientes
         lastSyncTime: null,
 
@@ -200,14 +186,17 @@ const App = {
             ui: { isDark: false, bgColor: '#f8fafc', textColor: '#1e293b', textSize: 'normal' }
         },
 
-        // Carga inicial del Backup. Si hay Firebase, estas variables se suscriben y refrescan en vivo.
-        cuentas: JSON.parse(JSON.stringify(SEED_DATA.cuentas)), 
-        transacciones: JSON.parse(JSON.stringify(SEED_DATA.transacciones)), 
-        viajes: JSON.parse(JSON.stringify(SEED_DATA.viajes)), 
-        clientesDir: JSON.parse(JSON.stringify(SEED_DATA.clientesDir)), 
-        socios: JSON.parse(JSON.stringify(SEED_DATA.socios)), 
-        pagosNomina: JSON.parse(JSON.stringify(SEED_DATA.pagosNomina)),
+        // MATRIZ DESVINCULADA: Arrays completamente limpios para hidratación desde Firebase
+        cuentas: [], 
+        transacciones: [], 
+        viajes: [], 
+        carteraViajes: [], 
+        carteraClientes: [], 
+        clientesDir: [], 
+        socios: [], 
+        pagosNomina: [],
         
+        // Tabla tarifaria base 2026 (Esto es configuración, no datos de BD, se mantiene fijo)
         nominaBase: [
             { id: 1, cargo: 'Capitán', valorDia: 190000, diasDefault: 5 }, { id: 2, cargo: 'Marinero 1', valorDia: 80000, diasDefault: 5 },
             { id: 3, cargo: 'Marinero 2', valorDia: 80000, diasDefault: 5 }, { id: 4, cargo: 'Marinero 3', valorDia: 80000, diasDefault: 5 },
@@ -236,23 +225,30 @@ const App = {
     setFilterVal: (key, val) => { App.state[key] = val; App.render(); },
     togglePdfConfig: (key) => { App.state.config.pdfIncludes[key] = !App.state.config.pdfIncludes[key]; App.render(); },
     
-    // Motor de Auto-Guardado Inteligente (Daemon)
+    // Motor de Auto-Guardado Inteligente (Daemon) - CORREGIDO (Evita Race Conditions)
     autoSyncDaemon: async () => {
-        if (!window.isFirebaseReady || !currentUser || !navigator.onLine || App.state.syncQueue.length === 0) return;
+        if (!window.isFirebaseReady || !currentUser || !navigator.onLine || App.state.syncQueue.length === 0 || App.state.isSyncingData) return;
         
         App.state.isSyncingData = true; App.render();
-        
-        // Aislamos la cola de trabajos para procesarla sin frenar la UI
-        const queueCopy = [...App.state.syncQueue];
-        App.state.syncQueue = []; 
 
-        for (let task of queueCopy) {
+        while(App.state.syncQueue.length > 0) {
+            const task = App.state.syncQueue[0];
             try {
-                await setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', task.colName, task.id.toString()), task.data, { merge: true });
+                if (task.type === 'batch') {
+                    const batch = writeBatch(db);
+                    task.operations.forEach(op => {
+                        const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
+                        batch.set(ref, op.data, { merge: true });
+                    });
+                    await batch.commit();
+                } else {
+                    await setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', task.colName, task.id.toString()), task.data, { merge: true });
+                }
+                // Solo se elimina de la cola si la subida fue exitosa
+                App.state.syncQueue.shift(); 
             } catch(e) {
-                console.error("Error en Auto-Sync, re-encolando...", e);
-                // Si vuelve a fallar la red a la mitad, lo devolvemos a la cola
-                if(!App.state.syncQueue.find(x => x.colName === task.colName && x.id === task.id)) App.state.syncQueue.push(task);
+                console.error("Auto-Sync detenido por intermitencia de red. Preservando integridad...", e);
+                break; // Rompe el ciclo, preservando el orden exacto de los cambios restantes
             }
         }
         
@@ -312,6 +308,10 @@ const App = {
     openAddCuenta: () => { App.state.editingCuentaId = null; App.state.formTemp.cuenta = { nombre: '', tipo: 'banco', saldoInicial: 0, numero: '' }; App.state.isAddCuentaOpen = true; App.render(); },
     editCuenta: (id) => { const c = App.state.cuentas.find(x => x.id === id); if(!c) return; App.state.editingCuentaId = id; App.state.formTemp.cuenta = { ...c }; App.state.isAddCuentaOpen = true; App.render(); },
     deleteCuenta: async (id, btnElement) => {
+        // CORRECCIÓN: Bloqueo de eliminación para cuentas con fondos (Fuga de dinero evitada)
+        const saldo = App.getSaldoCuenta(id);
+        if (saldo > 0) { alert(`Seguridad Financiera: No puede eliminar una cuenta con saldo a favor (${formatCOP(saldo)}). Transfiera los fondos antes de borrarla.`); return; }
+
         if(btnElement.innerText === 'Eliminar Cuenta') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
         else { await window.dbHelper.remove('cuentas', id); App.closeModals(); }
     },
@@ -331,8 +331,12 @@ const App = {
         if (t.tipo === 'transferencia') {
             const cuentaDest = parseInt(f.cuentaDestinoId.value); if(cuentaOrigen === cuentaDest || !cuentaDest) { alert("Cuentas deben ser distintas."); return; }
             const idRet = Date.now();
-            await window.dbHelper.save('transacciones', idRet, { id: idRet, cuentaId: cuentaOrigen, tipo: 'egreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia a #${cuentaDest} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null });
-            await window.dbHelper.save('transacciones', idRet + 1, { id: idRet + 1, cuentaId: cuentaDest, tipo: 'ingreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia de #${cuentaOrigen} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null });
+            // CORRECCIÓN ATÓMICA: Traspasos son una sola operación (Batch)
+            const batchOps = [
+                { colName: 'transacciones', id: idRet, data: { id: idRet, cuentaId: cuentaOrigen, tipo: 'egreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia a #${cuentaDest} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null } },
+                { colName: 'transacciones', id: idRet + 1, data: { id: idRet + 1, cuentaId: cuentaDest, tipo: 'ingreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia de #${cuentaOrigen} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null } }
+            ];
+            await window.dbHelper.saveBatch(batchOps);
         } else {
             const newId = Date.now();
             await window.dbHelper.save('transacciones', newId, { id: newId, cuentaId: cuentaOrigen, tipo: t.tipo, monto: t.monto, fecha: f.fecha.value, concepto: f.concepto.value, modulo: 'Tesoreria', referencia: null });
@@ -353,25 +357,40 @@ const App = {
 
         if (!App.state.editingViajeId) { if ((recaudoReal > 0 && !ctaIngreso) || (totalEgresos > 0 && !ctaEgreso)) { alert("Debe seleccionar las cajas/bancos para el movimiento de dinero."); return; } }
 
-        // Calculo Automático del Mes Seguro
         let periodoCalc = 'Nuevo Periodo';
         if (f.fecha.value) {
             const dateObj = new Date(f.fecha.value + 'T12:00:00Z');
             const mesStr = dateObj.toLocaleString('es-ES', { month: 'long', timeZone: 'UTC' });
-            const yearStr = dateObj.getUTCFullYear();
-            periodoCalc = `${mesStr.charAt(0).toUpperCase() + mesStr.slice(1)} ${yearStr}`;
+            periodoCalc = `${mesStr.charAt(0).toUpperCase() + mesStr.slice(1)} ${dateObj.getUTCFullYear()}`;
         }
 
         const viajeData = { fecha: f.fecha.value, ruta: f.ruta.value, ingreso: formD.ingreso, gastos: formD.gastos, cartera: formD.cartera, pagoFlete: formD.pagoFlete, pagoCargue: formD.pagoCargue, productos: f.productos.value, clientesAsociados: f.clientesAsociados.value, observaciones: f.observaciones.value, utilidadBruta: formD.ingreso - formD.gastos, ingresoRecaudado: recaudoReal };
         const newId = App.state.editingViajeId || Date.now();
         const fullData = { id: newId, viaje: App.state.editingViajeId ? App.state.viajes.find(v=>v.id===newId).viaje : `Viaje #${App.state.viajes.length + 1}`, periodo: App.state.editingViajeId ? App.state.viajes.find(v=>v.id===newId).periodo : periodoCalc, ...viajeData };
 
-        await window.dbHelper.save('viajes', newId, fullData);
+        // CORRECCIÓN ATÓMICA Y AUTOMATIZACIÓN DE CARTERA
+        const batchOps = [{ colName: 'viajes', id: newId, data: fullData }];
 
         if (!App.state.editingViajeId) {
-            if (recaudoReal > 0) await window.dbHelper.save('transacciones', Date.now() + 1, { id: Date.now() + 1, cuentaId: ctaIngreso, tipo: 'ingreso', monto: recaudoReal, fecha: f.fecha.value, concepto: `Recaudo Fletes - ${fullData.viaje}`, modulo: 'Viajes', referencia: newId });
-            if (totalEgresos > 0) await window.dbHelper.save('transacciones', Date.now() + 2, { id: Date.now() + 2, cuentaId: ctaEgreso, tipo: 'egreso', monto: totalEgresos, fecha: f.fecha.value, concepto: `Costos y Operación - ${fullData.viaje}`, modulo: 'Viajes', referencia: newId });
+            if (recaudoReal > 0 && ctaIngreso) batchOps.push({ colName: 'transacciones', id: Date.now() + 1, data: { id: Date.now() + 1, cuentaId: ctaIngreso, tipo: 'ingreso', monto: recaudoReal, fecha: f.fecha.value, concepto: `Recaudo Fletes - ${fullData.viaje}`, modulo: 'Viajes', referencia: newId } });
+            if (totalEgresos > 0 && ctaEgreso) batchOps.push({ colName: 'transacciones', id: Date.now() + 2, data: { id: Date.now() + 2, cuentaId: ctaEgreso, tipo: 'egreso', monto: totalEgresos, fecha: f.fecha.value, concepto: `Costos y Operación - ${fullData.viaje}`, modulo: 'Viajes', referencia: newId } });
+            
+            // Inyección Automática de Deudas en el Módulo Cartera
+            if (formD.cartera > 0) {
+                const carteraId = Date.now() + 3;
+                const clienteStr = f.clientesAsociados.value || 'General / Varios';
+                batchOps.push({ colName: 'carteraViajes', id: carteraId, data: { id: carteraId, idViaje: newId, viaje: fullData.viaje, cliente: clienteStr, concepto: f.productos.value || 'Flete pendiente', valor: formD.cartera, fecha: f.fecha.value } });
+                
+                const cClient = App.state.carteraClientes.find(c => c.cliente === clienteStr);
+                if (cClient) {
+                    batchOps.push({ colName: 'carteraClientes', id: cClient.id, data: { ...cClient, valorTotal: cClient.valorTotal + formD.cartera, estado: 'Pendiente' } });
+                } else {
+                    const newCId = Date.now() + 4;
+                    batchOps.push({ colName: 'carteraClientes', id: newCId, data: { id: newCId, cliente: clienteStr, conceptoGeneral: f.productos.value || 'General', valorTotal: formD.cartera, viajesAsociados: fullData.viaje, estado: 'Pendiente' } });
+                }
+            }
         }
+        await window.dbHelper.saveBatch(batchOps);
         App.closeModals();
     },
 
@@ -401,8 +420,12 @@ const App = {
         let extraInfo = `Prods: ${f.productosAsociados.value || 'N/A'} | Clientes: ${f.clientesAsociados.value || 'N/A'}`;
 
         const newId = Date.now();
-        await window.dbHelper.save('pagosNomina', newId, { id: newId, fecha: f.fecha.value, viaje: f.viaje.value, valor: totalPagado, estado: 'Pagado', detalle: detalleText, extra: extraInfo });
-        await window.dbHelper.save('transacciones', newId + 1, { id: newId + 1, cuentaId: ctaId, tipo: 'egreso', monto: totalPagado, fecha: f.fecha.value, concepto: `Liquidación de Nómina - ${f.viaje.value}`, modulo: 'Nomina', referencia: newId });
+        // CORRECCIÓN ATÓMICA: Nomina + Salida de dinero
+        const batchOps = [
+            { colName: 'pagosNomina', id: newId, data: { id: newId, fecha: f.fecha.value, viaje: f.viaje.value, valor: totalPagado, estado: 'Pagado', detalle: detalleText, extra: extraInfo } },
+            { colName: 'transacciones', id: newId + 1, data: { id: newId + 1, cuentaId: ctaId, tipo: 'egreso', monto: totalPagado, fecha: f.fecha.value, concepto: `Liquidación de Nómina - ${f.viaje.value}`, modulo: 'Nomina', referencia: newId } }
+        ];
+        await window.dbHelper.saveBatch(batchOps);
         App.closeModals();
     },
 
@@ -417,11 +440,13 @@ const App = {
         const newId = App.state.editingSocioId || Date.now();
         
         const socioData = { nombre: f.nombre.value, porcentaje: parseFloat(f.porcentaje.value), inversion: formD.inversion, saldoMantenimiento: f.tipoSaldo.value === 'deuda' ? -Math.abs(formD.saldoMantenimiento) : Math.abs(formD.saldoMantenimiento), utilidadCausada: App.state.editingSocioId ? App.state.socios.find(x => x.id === newId).utilidadCausada : 0 };
-        await window.dbHelper.save('socios', newId, { id: newId, ...socioData });
         
+        // CORRECCIÓN ATÓMICA
+        const batchOps = [{ colName: 'socios', id: newId, data: { id: newId, ...socioData } }];
         if (!App.state.editingSocioId && formD.inversion > 0 && ctaId) {
-            await window.dbHelper.save('transacciones', Date.now() + 1, { id: Date.now() + 1, cuentaId: ctaId, tipo: 'ingreso', monto: formD.inversion, fecha: new Date().toISOString().split('T')[0], concepto: `Aporte Inversión Inicial - ${socioData.nombre}`, modulo: 'Socios', referencia: newId });
+            batchOps.push({ colName: 'transacciones', id: Date.now() + 1, data: { id: Date.now() + 1, cuentaId: ctaId, tipo: 'ingreso', monto: formD.inversion, fecha: new Date().toISOString().split('T')[0], concepto: `Aporte Inversión Inicial - ${socioData.nombre}`, modulo: 'Socios', referencia: newId } });
         }
+        await window.dbHelper.saveBatch(batchOps);
         App.closeModals();
     },
     openTransferModal: () => { App.state.isTransferOpen = true; App.render(); },
@@ -432,8 +457,12 @@ const App = {
 
         const fraction = pct / s[vIdx].porcentaje; const invTransfer = s[vIdx].inversion * fraction; const deudaTransfer = s[vIdx].saldoMantenimiento * fraction;
         
-        await window.dbHelper.save('socios', vId, { ...s[vIdx], porcentaje: s[vIdx].porcentaje - pct, inversion: s[vIdx].inversion - invTransfer, saldoMantenimiento: s[vIdx].saldoMantenimiento - deudaTransfer });
-        await window.dbHelper.save('socios', cId, { ...s[cIdx], porcentaje: s[cIdx].porcentaje + pct, inversion: s[cIdx].inversion + invTransfer, saldoMantenimiento: s[cIdx].saldoMantenimiento + deudaTransfer });
+        // CORRECCIÓN ATÓMICA: Evita pérdida de capital si se va la red en plena transferencia
+        const batchOps = [
+            { colName: 'socios', id: vId, data: { ...s[vIdx], porcentaje: s[vIdx].porcentaje - pct, inversion: s[vIdx].inversion - invTransfer, saldoMantenimiento: s[vIdx].saldoMantenimiento - deudaTransfer } },
+            { colName: 'socios', id: cId, data: { ...s[cIdx], porcentaje: s[cIdx].porcentaje + pct, inversion: s[cIdx].inversion + invTransfer, saldoMantenimiento: s[cIdx].saldoMantenimiento + deudaTransfer } }
+        ];
+        await window.dbHelper.saveBatch(batchOps);
         App.closeModals();
     },
 
@@ -460,7 +489,7 @@ const App = {
         s.viajes.forEach(v => {
             const per = v.periodo || 'General';
             if (!periodosMap[per]) {
-                periodosMap[per] = { periodo: per, ingresoProy: 0, ingresoReal: 0, utilProy: 0, utilReal: 0, cartera: 0, gastos: 0 };
+                periodosMap[per] = { periodo: per, ingresoProy: 0, ingresoReal: 0, utilProy: 0, utilReal: 0, cartera: 0, gastos: 0, _date: new Date(v.fecha || '2000-01-01') };
             }
             periodosMap[per].ingresoProy += Number(v.ingreso) || 0;
             periodosMap[per].ingresoReal += Number(v.ingresoRecaudado) || 0;
@@ -468,8 +497,14 @@ const App = {
             periodosMap[per].utilProy += Number(v.utilidadBruta) || 0;
             periodosMap[per].cartera += Number(v.cartera) || 0;
             periodosMap[per].utilReal += (Number(v.ingresoRecaudado) || 0) - (Number(v.gastos) || 0);
+            
+            // Evaluamos la fecha más reciente del periodo para organizar cronológicamente
+            if (v.fecha && new Date(v.fecha) > periodosMap[per]._date) periodosMap[per]._date = new Date(v.fecha);
         });
-        return Object.values(periodosMap);
+        
+        // CORRECCIÓN GRÁFICA: Ordenamiento Cronológico Obligatorio + Seguro Antifallos
+        const arr = Object.values(periodosMap).sort((a, b) => a._date - b._date);
+        return arr.length > 0 ? arr : [{ periodo: 'Sin Movimientos', ingresoProy: 0, utilProy: 0, utilReal: 0, gastos: 0 }];
     },
 
     getTotales: () => {
@@ -477,9 +512,9 @@ const App = {
         const ingresoTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.ingreso || 0), 0);
         const gastoTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.gastos || 0), 0);
         const utilidadBruta = s.viajes.reduce((acc, curr) => acc + Number(curr.utilidadBruta || 0), 0);
-        const carteraTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.cartera || 0), 0); 
+        const carteraTotal = s.carteraClientes.filter(c => c.estado === 'Pendiente').reduce((acc, curr) => acc + Number(curr.valorTotal), 0); 
         const utilidadNeta = ingresoTotal - gastoTotal; 
-        const ingresoRecaudado = s.viajes.reduce((acc, curr) => acc + Number(curr.ingresoRecaudado || 0), 0);
+        const ingresoRecaudado = ingresoTotal - carteraTotal;
         const inversionTotal = s.socios.reduce((acc, curr) => acc + Number(curr.inversion || 0), 0);
         const deudaMantenimientoTotal = s.socios.filter(x => x.saldoMantenimiento < 0).reduce((acc, curr) => acc + Math.abs(curr.saldoMantenimiento || 0), 0);
         return { ingresoTotal, gastoTotal, utilidadBruta, carteraTotal, utilidadNeta, ingresoRecaudado, inversionTotal, deudaMantenimientoTotal };
@@ -591,26 +626,53 @@ const App = {
     
     renderCartera: () => {
         const s = App.state;
-        const viajesConDeuda = s.viajes.filter(v => v.cartera > 0);
-        const totalCartera = viajesConDeuda.reduce((acc, v) => acc + Number(v.cartera), 0);
+        const cv = s.carteraViajeFiltro === 'Todos' ? s.carteraViajes : s.carteraViajes.filter(v => v.viaje === s.carteraViajeFiltro);
+        const totalFiltro = cv.reduce((sum, i) => sum + i.valor, 0);
+
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="wallet" class="mr-2 text-orange-600"></i> Cuentas por Cobrar</h2>
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
+                <div><h2 class="text-2xl font-bold">Cartera de Clientes</h2><p class="text-sm text-slate-500">Deudas consolidadas y cotejadas</p></div>
+                <div class="bg-orange-100 text-orange-800 px-4 py-2.5 rounded-xl font-black border border-orange-200 shadow-sm w-full sm:w-auto text-center">Exigible: ${formatCOP(App.getTotales().carteraTotal)}</div>
             </div>
-            <div class="bg-orange-50 border border-orange-200 p-5 rounded-2xl flex justify-between items-center shadow-sm">
-                <span class="text-orange-900 font-bold uppercase tracking-widest text-sm">Cartera Activa Total:</span>
-                <span class="text-orange-600 font-black text-3xl">${formatCOP(totalCartera)}</span>
+
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="w-full overflow-x-auto table-scroll">
+                    <table class="w-full text-left border-collapse min-w-[700px]">
+                        <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4 whitespace-nowrap">Cliente</th><th class="p-4">Concepto General</th><th class="p-4">Estado</th><th class="p-4 text-right whitespace-nowrap">Total Adeudado</th></tr></thead>
+                        <tbody>
+                            ${s.carteraClientes.map(c => `
+                            <tr onclick="window.App.openModalCliente('${c.cliente}')" class="border-b hover:bg-slate-50 cursor-pointer transition-colors">
+                                <td class="p-4 font-bold text-slate-800">${c.cliente}</td><td class="p-4 text-sm text-slate-600">${c.conceptoGeneral}</td>
+                                <td class="p-4"><span class="text-[10px] font-bold uppercase bg-orange-100 text-orange-700 px-2 py-1 rounded-md border border-orange-200">${c.estado}</span></td>
+                                <td class="p-4 text-right font-black text-orange-600">${formatCOP(c.valorTotal)}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                ${viajesConDeuda.map(v => `
-                <div onclick="window.App.openModalViaje(${v.id})" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-md transition-shadow relative overflow-hidden">
-                    <div class="absolute top-0 left-0 w-1 h-full bg-orange-400"></div>
-                    <p class="font-black text-slate-800">${v.viaje}</p>
-                    <p class="text-xs text-slate-500 mb-3">${v.clientesAsociados || 'Cliente no especificado'} • ${v.fecha}</p>
-                    <div class="bg-slate-50 p-2 rounded flex justify-between items-center"><span class="text-[10px] uppercase font-bold text-slate-400">Deuda Restante</span><span class="font-black text-orange-600 text-lg">${formatCOP(v.cartera)}</span></div>
-                </div>`).join('')}
-                ${viajesConDeuda.length === 0 ? '<div class="col-span-full p-8 text-center text-slate-400 font-medium">No hay cartera activa o deudas pendientes.</div>' : ''}
+
+            <div class="mt-8 border-t-2 border-slate-200 pt-6">
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-4 bg-slate-800 p-4 rounded-xl shadow-inner text-white">
+                    <h3 class="text-lg font-bold flex items-center"><i data-lucide="ship" class="mr-2 text-blue-400 w-5 h-5"></i> Cuentas por Cobrar Específicas</h3>
+                    <select onchange="window.App.setFilterVal('carteraViajeFiltro', this.value)" class="w-full md:w-64 border-none rounded-lg p-2.5 text-sm bg-slate-700 text-white font-medium focus:ring focus:ring-blue-500 outline-none">
+                        <option value="Todos" ${s.carteraViajeFiltro === 'Todos'?'selected':''}>Ver Todos los Viajes</option>
+                        ${s.viajes.map(v => `<option value="${v.viaje}" ${s.carteraViajeFiltro === v.viaje?'selected':''}>${v.viaje} (${v.periodo})</option>`).join('')}
+                    </select>
+                </div>
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                    <div class="w-full overflow-x-auto table-scroll">
+                        <table class="w-full text-left border-collapse min-w-[650px]">
+                            <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Viaje</th><th class="p-4">Cliente (Deudor)</th><th class="p-4">Concepto Facturado</th><th class="p-4 text-right">Monto Adeudado</th></tr></thead>
+                            <tbody>
+                                ${cv.length ? cv.map(c => `
+                                <tr class="border-b hover:bg-slate-50"><td class="p-4 text-sm font-bold text-slate-700 whitespace-nowrap"><span class="bg-slate-100 px-2 py-1 rounded border">${c.viaje}</span></td><td class="p-4 text-sm font-black text-slate-800 whitespace-nowrap"><i data-lucide="user" class="inline w-3 h-3 mr-1 text-slate-400"></i>${c.cliente}</td><td class="p-4 text-sm text-slate-500">${c.concepto}</td><td class="p-4 text-right font-bold text-orange-600 whitespace-nowrap">${formatCOP(c.valor)}</td></tr>`).join('') 
+                                : '<tr><td colspan="4" class="p-8 text-center text-slate-500 font-medium bg-slate-50"><i data-lucide="check-circle" class="w-8 h-8 mx-auto text-green-400 mb-2"></i>Este viaje no tiene cartera pendiente registrada.</td></tr>'}
+                                ${cv.length ? `<tr class="bg-orange-50"><td colspan="3" class="p-4 text-right font-bold text-orange-900 text-sm uppercase">Total Adeudado (${s.carteraViajeFiltro}):</td><td class="p-4 text-right font-black text-orange-700 text-lg whitespace-nowrap">${formatCOP(totalFiltro)}</td></tr>` : ''}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>`;
     },
@@ -631,27 +693,38 @@ const App = {
 
     renderNomina: () => {
         const s = App.state;
+        const totalDiaria = s.nominaBase.reduce((acc, curr) => acc + curr.valorDia, 0);
+
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="users" class="mr-2 text-blue-600"></i> Liquidación de Nómina</h2>
-                <button onclick="window.App.openAddNomina()" class="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-slate-800 shadow-sm flex items-center transition-colors"><i data-lucide="calculator" class="w-4 h-4 mr-2"></i> Nueva Liquidación</button>
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
+                <div><h2 class="text-2xl font-bold">Gestión de Nómina</h2><p class="text-sm text-slate-500">Base de liquidación dinámica</p></div>
+                <button onclick="window.App.openAddNomina()" class="w-full sm:w-auto bg-slate-900 text-white px-4 py-3 sm:py-2.5 rounded-xl font-bold flex justify-center items-center shadow-sm hover:bg-slate-800 transition-colors"><i data-lucide="badge-dollar-sign" class="w-4 h-4 mr-2"></i> Liquidar Nómina de Viaje</button>
             </div>
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                <div class="w-full overflow-x-auto table-scroll">
-                    <table class="w-full text-left border-collapse min-w-[700px]">
-                        <thead class="bg-slate-50 border-b text-[10px] uppercase text-slate-500 font-bold"><tr><th class="p-4">Fecha / Viaje</th><th class="p-4">Detalle Tripulación</th><th class="p-4">Info Extra</th><th class="p-4 text-right">Total Pagado</th></tr></thead>
-                        <tbody>
-                            ${s.pagosNomina.sort((a,b)=>b.id-a.id).map(n => `
-                            <tr class="border-b hover:bg-slate-50 transition-colors">
-                                <td class="p-4"><p class="font-black text-slate-800">${n.viaje}</p><p class="text-xs text-slate-500">${n.fecha}</p></td>
-                                <td class="p-4"><p class="font-medium text-slate-700 text-sm">${n.detalle}</p></td>
-                                <td class="p-4 text-xs text-slate-500">${n.extra || 'N/A'}</td>
-                                <td class="p-4 text-right font-black text-slate-800">${formatCOP(n.valor)}</td>
-                            </tr>`).join('')}
-                            ${s.pagosNomina.length === 0 ? '<tr><td colspan="4" class="p-8 text-center text-slate-400 font-medium">No hay pagos de nómina registrados.</td></tr>' : ''}
-                        </tbody>
-                    </table>
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+                    <div class="p-4 sm:p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800 text-sm sm:text-base"><i data-lucide="receipt" class="mr-2 text-green-500 w-5 h-5"></i> Historial de Pagos</h3></div>
+                    <div class="p-4 sm:p-5 space-y-3 overflow-y-auto max-h-[500px]">
+                        ${s.pagosNomina.map(p => `
+                            <div class="flex justify-between items-center p-3 sm:p-4 border rounded-xl hover:border-green-200 transition-colors bg-white shadow-sm">
+                                <div class="flex items-center"><div class="bg-green-100 p-2 rounded-lg text-green-600 mr-3 sm:mr-4 shrink-0"><i data-lucide="check-circle" class="w-4 h-4 sm:w-5 sm:h-5"></i></div><div><p class="font-bold text-sm sm:text-base text-slate-800">${p.viaje}</p><p class="text-[10px] sm:text-xs text-slate-500 font-medium">${p.fecha} • ${p.detalle}</p><p class="text-[9px] text-slate-400 mt-0.5">${p.extra}</p></div></div>
+                                <div class="text-right"><p class="font-black text-sm sm:text-base text-slate-800">${formatCOP(p.valor)}</p><p class="text-[9px] sm:text-[10px] font-bold text-green-600 uppercase mt-1 bg-green-50 inline-block px-2 py-0.5 rounded">${p.estado}</p></div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                    <div class="p-4 sm:p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800 text-sm sm:text-base"><i data-lucide="users" class="mr-2 text-blue-500 w-5 h-5"></i> Tabla Tarifaria Base (2026)</h3></div>
+                    <div class="w-full overflow-x-auto table-scroll">
+                        <table class="w-full text-left border-collapse min-w-[400px]">
+                            <thead><tr class="text-slate-500 text-[10px] sm:text-xs uppercase border-b bg-white"><th class="p-3 sm:p-4">Cargo Autorizado</th><th class="p-3 sm:p-4 text-right">Tarifa Día</th></tr></thead>
+                            <tbody>
+                                ${s.nominaBase.map(n => `<tr class="border-b text-xs sm:text-sm hover:bg-slate-50"><td class="p-3 sm:p-4 font-bold text-slate-700 whitespace-nowrap">${n.cargo}</td><td class="p-3 sm:p-4 text-right font-medium text-slate-600 whitespace-nowrap">${formatCOP(n.valorDia)}</td></tr>`).join('')}
+                                <tr class="bg-blue-50/50"><td class="p-3 sm:p-4 font-black text-blue-900 text-xs sm:text-sm whitespace-nowrap">COSTO TOTAL POR DÍA O.</td><td class="p-3 sm:p-4 font-black text-right text-blue-700 text-base sm:text-lg whitespace-nowrap">${formatCOP(totalDiaria)}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -661,20 +734,36 @@ const App = {
         const s = App.state;
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="contact" class="mr-2 text-blue-600"></i> Directorio de Clientes</h2>
-                <button onclick="window.App.state.isAddClienteOpen=true; window.App.state.editingClienteId=null; window.App.render()" class="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-green-700 shadow-sm flex items-center transition-colors"><i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Cliente</button>
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
+                <div><h2 class="text-2xl font-bold">Directorio de Clientes y Entidades</h2><p class="text-sm text-slate-500">Gestión de relaciones comerciales y rutas</p></div>
+                <button onclick="window.App.state.isAddClienteOpen=true; window.App.state.editingClienteId=null; window.App.render()" class="w-full sm:w-auto bg-blue-600 text-white px-4 py-3 sm:py-2.5 rounded-xl font-bold flex justify-center items-center shadow-sm hover:bg-blue-700 transition-colors"><i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Registro</button>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                ${s.clientesDir.map(c => `
-                <div onclick="window.App.openModalCliente('${c.nombre}')" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-md transition-all group relative">
-                    <div class="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-blue-500"><i data-lucide="external-link" class="w-4 h-4"></i></div>
-                    <div class="flex items-center mb-3"><div class="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xl mr-4">${c.nombre.charAt(0).toUpperCase()}</div><div><h3 class="font-black text-slate-800 text-lg leading-tight">${c.nombre}</h3><span class="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-bold uppercase">${c.segmento}</span></div></div>
-                    <div class="space-y-1 text-xs text-slate-600">
-                        <p class="flex items-center"><i data-lucide="map-pin" class="w-3 h-3 mr-2 text-slate-400"></i> ${c.ubicacion}</p>
-                        <p class="flex items-center"><i data-lucide="phone" class="w-3 h-3 mr-2 text-slate-400"></i> ${c.telefono}</p>
-                    </div>
-                </div>`).join('')}
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="w-full overflow-x-auto table-scroll">
+                    <table class="w-full text-left border-collapse min-w-[900px]">
+                        <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Entidad / Cliente</th><th class="p-4">NIT/CC</th><th class="p-4">Segmento</th><th class="p-4">Actividad</th><th class="p-4">Contacto</th><th class="p-4 text-right">Estado Cartera</th></tr></thead>
+                        <tbody>
+                            ${s.clientesDir.map(c => {
+                                const deuda = s.carteraClientes.find(car => car.cliente.includes(c.nombre));
+                                const tieneDeuda = deuda && deuda.estado === 'Pendiente';
+                                let bgSegmento = 'bg-slate-100 text-slate-700';
+                                if(c.segmento === 'Proyecto') bgSegmento = 'bg-indigo-100 text-indigo-700';
+                                else if(c.segmento === 'Comerciante') bgSegmento = 'bg-blue-100 text-blue-700';
+                                else if(c.segmento === 'Interno') bgSegmento = 'bg-slate-800 text-white';
+
+                                return `
+                                <tr class="border-b hover:bg-slate-50 cursor-pointer transition-colors" onclick="window.App.openModalCliente('${c.nombre}')">
+                                    <td class="p-4 flex items-center whitespace-nowrap"><div class="w-8 h-8 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center font-bold mr-3 shrink-0">${c.nombre.charAt(0).toUpperCase()}</div><span class="font-bold text-slate-800">${c.nombre}</span></td>
+                                    <td class="p-4 text-xs font-medium text-slate-500 whitespace-nowrap">${c.nit || 'N/A'}</td>
+                                    <td class="p-4 text-xs whitespace-nowrap"><span class="${bgSegmento} px-2 py-1 rounded-md font-bold">${c.segmento || 'General'}</span></td>
+                                    <td class="p-4 text-xs text-slate-600 whitespace-nowrap">${c.tipo}</td>
+                                    <td class="p-4 text-xs font-medium whitespace-nowrap">${c.telefono} <br><span class="text-[10px] text-slate-400">${c.ubicacion}</span></td>
+                                    <td class="p-4 text-right whitespace-nowrap"><div class="inline-block px-3 py-1 rounded-lg text-xs font-bold ${tieneDeuda ? 'bg-orange-50 text-orange-700 border-orange-200 border' : 'bg-green-50 text-green-700 border-green-200 border'}">${tieneDeuda ? formatCOP(deuda.valorTotal) : 'A Paz y Salvo'}</div></td>
+                                </tr>`
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>`;
     },
@@ -866,12 +955,17 @@ const App = {
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
                 <h3 class="font-bold text-lg text-slate-800 mb-4 border-b pb-3 flex items-center"><i data-lucide="hard-drive" class="w-5 h-5 mr-2 text-slate-400"></i> Copias de Seguridad Locales</h3>
                 <p class="text-xs text-slate-500 mb-5">Exporta el registro tabular de ingresos y fletes en formato CSV compatible con Microsoft Excel y Google Sheets. Útil para contabilidad externa.</p>
-                <button onclick="App.exportToExcel()" class="w-full sm:w-auto bg-green-600 text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-700 transition shadow-sm">
-                    <i data-lucide="file-spreadsheet" class="w-5 h-5 mr-2"></i> Exportar BD a Excel (.csv)
-                </button>
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <button onclick="App.exportToExcel()" class="w-full sm:w-auto bg-green-600 text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-700 transition shadow-sm">
+                        <i data-lucide="file-spreadsheet" class="w-5 h-5 mr-2"></i> Exportar BD a Excel (.csv)
+                    </button>
+                    <button onclick="window.runInitialMigration()" class="w-full sm:w-auto bg-slate-800 text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center hover:bg-slate-900 transition shadow-sm">
+                        <i data-lucide="database-zap" class="w-5 h-5 mr-2 text-yellow-400"></i> Inyectar Excel Original
+                    </button>
+                </div>
             </div>
 
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl mt-6">
                 <h3 class="font-bold text-lg text-slate-800 mb-2 border-b pb-3 flex items-center"><i data-lucide="file-text" class="w-5 h-5 mr-2 text-slate-400"></i> Opciones de Informe PDF (NIIF)</h3>
                 <p class="text-xs text-slate-500 mb-5">Activa o desactiva los submódulos que deseas anexar al final del "Informe Consolidado" al momento de presionar Exportar PDF. Esto te permite generar un documento más corto si solo requieres los datos operativos.</p>
                 
@@ -1404,15 +1498,9 @@ const App = {
         // Modal Detalle Cliente
         if (s.selectedCliente) {
             const c = s.selectedCliente;
-            
-            // PARCHE 3: Búsqueda exacta separada por comas para evitar falsos positivos
-            const exactMatch = (str, target) => {
-                if(!str) return false;
-                return str.split(',').map(x=>x.trim().toLowerCase()).includes(target.toLowerCase());
-            };
-            
-            const viajesRelacionados = s.viajes.filter(v => exactMatch(v.clientesAsociados, c.nombre) || (v.observaciones && v.observaciones.toLowerCase().includes(c.nombre.toLowerCase())));
-            const deudaTotal = viajesRelacionados.reduce((acc, v) => acc + (Number(v.cartera) || 0), 0);
+            const deudaObj = s.carteraClientes.find(car => car.cliente.includes(c.nombre));
+            const deudaTotal = deudaObj ? deudaObj.valorTotal : 0;
+            const viajesRelacionados = s.viajes.filter(v => (v.clientesAsociados && v.clientesAsociados.includes(c.nombre)) || (v.observaciones && v.observaciones.includes(c.nombre)));
 
             h += `<div class="${modalContainerClass}" onclick="window.App.closeModals()">
                 <div class="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden animate-slide-up shadow-2xl flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
@@ -1475,6 +1563,13 @@ const App = {
                     </div>
                 </div>
             </div>`;
+        }
+
+        // Formulario Agregar / Editar Cliente
+        if (s.isAddClienteOpen) {
+            const fClient = s.formTemp.cliente;
+            const titulo = s.editingClienteId ? 'Editar Registro' : 'Registrar Cliente';
+            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${titulo}</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitCliente(event)" class="space-y-4"><input name="nombre" type="text" value="${fClient.nombre}" placeholder="Nombre Comercial o Persona" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="nit" type="text" value="${fClient.nit === 'N/A' ? '' : fClient.nit}" placeholder="NIT / Cédula" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><div class="grid grid-cols-2 gap-3"><select name="segmento" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="Persona Común" ${fClient.segmento==='Persona Común'?'selected':''}>Persona Común</option><option value="Comerciante" ${fClient.segmento==='Comerciante'?'selected':''}>Comerciante</option><option value="Proyecto" ${fClient.segmento==='Proyecto'?'selected':''}>Proyecto G/P</option><option value="Interno" ${fClient.segmento==='Interno'?'selected':''}>Socio Interno</option></select><select name="tipo" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="Comercio de Madera" ${fClient.tipo.includes('Madera')?'selected':''}>Comercio Madera</option><option value="Materiales Construcción" ${fClient.tipo.includes('Construcción')?'selected':''}>Materiales Cons.</option><option value="Equipos e Insumos" ${fClient.tipo.includes('Insumos')?'selected':''}>Insumos/Equipos</option><option value="General" ${fClient.tipo.includes('General')?'selected':''}>General / Otros</option></select></div><input name="telefono" type="text" value="${fClient.telefono}" placeholder="Teléfono Móvil" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="ubicacion" type="text" value="${fClient.ubicacion}" placeholder="Ubicación Detallada" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Guardar Cliente</button></form></div></div>`;
         }
 
         // Formulario Agregar / Editar Socio
@@ -1566,9 +1661,9 @@ const App = {
 
         if (window.lucide) window.lucide.createIcons();
 
-        // PARCHE 2: Sincronización robusta con setTimeout para evitar que el DOM bloquee Chart.js
+        // CORRECCIÓN 3: Reemplazo del setTimout inestable por API nativa robusta (requestAnimationFrame)
         if(App.state.activeTab === 'dashboard') {
-            setTimeout(() => {
+            requestAnimationFrame(() => {
                 const ctx = document.getElementById('lineChart');
                 if(ctx && typeof Chart !== 'undefined') {
                     const s = App.state;
@@ -1577,41 +1672,105 @@ const App = {
                     if (s.dashboardChartFiltro === 'Ultimos2') dataToRender = dataToRender.slice(-2);
                     else if (s.dashboardChartFiltro === 'Ultimo') dataToRender = dataToRender.slice(-1);
 
-                    // Sanitización Anti-Crash
-                    if(!dataToRender || dataToRender.length === 0) dataToRender = [{ periodo: 'Sin Datos', ingresoProy: 0, utilProy: 0, utilReal: 0, gastos: 0 }];
-
                     const labels = dataToRender.map(p => String(p.periodo || 'General').split(' ')[0]); 
                     const ingresosBrutos = dataToRender.map(p => p.ingresoProy); 
                     const utilidadesBrutas = dataToRender.map(p => p.utilProy);
                     const utilidadesNetas = dataToRender.map(p => p.utilReal); 
                     const costos = dataToRender.map(p => p.gastos); 
 
-                    if(window.dashChart) window.dashChart.destroy();
-                    window.dashChart = new Chart(ctx, {
-                        type: 'line',
-                        data: { 
-                            labels: labels, 
-                            datasets: [
-                                { label: 'Ingresos', data: ingresosBrutos, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }, 
-                                { label: 'Costos', data: costos, borderColor: '#ef4444', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, borderDash: [5, 5], pointRadius: 2 },
-                                { label: 'Util. Bruta', data: utilidadesBrutas, borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, pointRadius: 2 },
-                                { label: 'Util. Neta', data: utilidadesNetas, borderColor: '#0f766e', backgroundColor: 'rgba(15, 118, 110, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }
-                            ]
-                        },
-                        options: { 
-                            responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-                            plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 6, font: { weight: 'bold', size: window.innerWidth < 640 ? 10 : 12 } } }, tooltip: { callbacks: { label: function(context) { return context.dataset.label + ': ' + window.formatCOP(context.parsed.y); } } } }, 
-                            scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { weight: 'bold', size: 10 }, color: '#94a3b8', callback: function(value) { return '$' + (value / 1000000) + 'M'; } } }, x: { grid: { display: false }, ticks: { font: { weight: 'bold', size: 10 }, color: '#64748b' } } } 
-                        }
-                    });
-                }
-            }, 50);
+                    if(window.dashChart) {
+                        // Actualización reactiva sin destrucción del Canvas (Evita Memory Leaks)
+                        window.dashChart.data.labels = labels;
+                        window.dashChart.data.datasets[0].data = ingresosBrutos;
+                        window.dashChart.data.datasets[1].data = costos;
+                        window.dashChart.data.datasets[2].data = utilidadesBrutas;
+                        window.dashChart.data.datasets[3].data = utilidadesNetas;
+                        window.dashChart.update('none'); // Update rápido sin re-animar desde cero
+                    } else {
+                        window.dashChart = new Chart(ctx, {
+                            type: 'line',
+                            data: { 
+                                labels: labels, 
+                                datasets: [
+                                    { label: 'Ingresos', data: ingresosBrutos, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }, 
+                                    { label: 'Costos', data: costos, borderColor: '#ef4444', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, borderDash: [5, 5], pointRadius: 2 },
+                                    { label: 'Util. Bruta', data: utilidadesBrutas, borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, pointRadius: 2 },
+                                    { label: 'Util. Neta', data: utilidadesNetas, borderColor: '#0f766e', backgroundColor: 'rgba(15, 118, 110, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }
+                                ]
+                            },
+                            options: { 
+                                responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+                                plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 6, font: { weight: 'bold', size: window.innerWidth < 640 ? 10 : 12 } } }, tooltip: { callbacks: { label: function(context) { return context.dataset.label + ': ' + window.formatCOP(context.parsed.y); } } } }, 
+                                scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { weight: 'bold', size: 10 }, color: '#94a3b8', callback: function(value) { return '$' + (value / 1000000) + 'M'; } } }, x: { grid: { display: false }, ticks: { font: { weight: 'bold', size: 10 }, color: '#64748b' } } } 
+                            }
+                        });
+                    }
+                } // <-- CORRECCIÓN: Llave de cierre restaurada para el if (ctx && typeof Chart !== 'undefined')
+            });
         }
     }
 };
 
-// Exponer el objeto App de forma global (Requerido al usar type="module")
+// Exponer el objeto App de forma global
 window.App = App;
+
+/**
+ * ==========================================
+ * SCRIPT DE MIGRACIÓN: BASE DE DATOS REAL EXCEL
+ * Totalmente desvinculada de la matriz general. Se inyecta exclusivamente bajo demanda.
+ * ==========================================
+ */
+window.runInitialMigration = async () => {
+    if (!confirm("⚠️ ¿Deseas inyectar los datos maestros del Excel a la Nube? Esto insertará los valores iniciales reales a Firebase de forma permanente.")) return;
+    App.state.isSyncingData = true; App.render();
+    const ops = [];
+
+    // 1. Cuentas
+    [{ id: 1, nombre: 'Banco Agrario Principal', tipo: 'banco', saldoInicial: 10000000, numero: '123-456-789' },
+     { id: 2, nombre: 'Caja Fuerte (Barco)', tipo: 'caja', saldoInicial: 5000000, numero: 'Efectivo' },
+     { id: 3, nombre: 'Caja Menor Operativa', tipo: 'caja_menor', saldoInicial: 1500000, numero: 'Efectivo' }].forEach(c => ops.push({ colName: 'cuentas', id: c.id, data: c }));
+
+    // 2. Socios
+    [{ id: 1, nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -81900472, utilidadCausada: 69689184 },
+     { id: 2, nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0, utilidadCausada: 67946954 },
+     { id: 3, nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0, utilidadCausada: 26133444 },
+     { id: 4, nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0, utilidadCausada: 3867751 },
+     { id: 5, nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0, utilidadCausada: 3379991 },
+     { id: 6, nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0, utilidadCausada: 2961849 }].forEach(s => ops.push({ colName: 'socios', id: s.id, data: s }));
+
+    // 3. Viajes (Datos Reales extraidos del CSV)
+    [{ id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, utilidadBruta: 37849000, cartera: 12411000, ingresoRecaudado: 54545000, observaciones: 'Madera bajada Satinga', clientesAsociados: 'Oscar, Pepe', productos: 'Madera Aserrada', pagoFlete: 54545000, pagoCargue: 2000000 },
+     { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, utilidadBruta: 28100000, cartera: 11084000, ingresoRecaudado: 35356300, observaciones: 'Madera de exportación', clientesAsociados: 'Oscar', productos: 'Madera Fina', pagoFlete: 35356300, pagoCargue: 1500000 },
+     { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, utilidadBruta: 46260000, cartera: 0, ingresoRecaudado: 73131000, observaciones: 'Flete completo pagado', clientesAsociados: 'Konny Hospital', productos: 'Equipos Médicos', pagoFlete: 73131000, pagoCargue: 3000000 },
+     { id: 4, fecha: '2025-12-02', viaje: 'Viaje #4', periodo: 'Dic 2025', ruta: 'B/tura - Charco', ingreso: 80023500, gastos: 22800000, utilidadBruta: 57223500, cartera: 32119500, ingresoRecaudado: 47904000, observaciones: 'Tubos, Grava, Varillas Tola', clientesAsociados: 'Alex, Oscar', productos: 'Material Construcción, Madera', pagoFlete: 47904000, pagoCargue: 4500000 },
+     { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', periodo: 'Dic 2025', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, utilidadBruta: 18820000, cartera: 0, ingresoRecaudado: 34820000, observaciones: 'Viaje Tumaco sin cartera', clientesAsociados: 'Modesto', productos: 'Víveres y Abarrotes', pagoFlete: 34820000, pagoCargue: 1200000 }].forEach(v => ops.push({ colName: 'viajes', id: v.id, data: v }));
+
+    // 4. Cartera Viajes
+    [{ id: 1, idViaje: 1, viaje: 'Viaje #1', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 12411000, fecha: '2025-10-25' },
+     { id: 2, idViaje: 2, viaje: 'Viaje #2', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 11084000, fecha: '2025-11-09' },
+     { id: 3, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Tubos / Grava La Tola', valor: 13000000, fecha: '2025-12-02' },
+     { id: 4, idViaje: 4, viaje: 'Viaje #4', cliente: 'Konny Hospital', concepto: 'Proyecto Hospital', valor: 1000000, fecha: '2025-12-02' },
+     { id: 5, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Varillas Tola', valor: 4900000, fecha: '2025-12-02' },
+     { id: 6, idViaje: 4, viaje: 'Viaje #4', cliente: 'Oscar', concepto: 'Madera bajada', valor: 8209500, fecha: '2025-12-02' }].forEach(c => ops.push({ colName: 'carteraViajes', id: c.id, data: c }));
+
+    // 5. Cartera Clientes
+    [{ id: 1, cliente: 'John Jairo Silva', conceptoGeneral: 'Equipos e insumos', valorTotal: 41300000, viajesAsociados: 'Histórico', estado: 'Pendiente' },
+     { id: 2, cliente: 'Oscar', conceptoGeneral: 'Madera bajada (Satinga)', valorTotal: 31704500, viajesAsociados: 'Viaje #1, #2, #4', estado: 'Pendiente' },
+     { id: 3, cliente: 'Alex', conceptoGeneral: 'Materiales construcción Tola', valorTotal: 31400000, viajesAsociados: 'Viaje #4 y otros', estado: 'Pendiente' },
+     { id: 4, cliente: 'Konny Hospital', conceptoGeneral: 'Transporte Hospital', valorTotal: 1000000, viajesAsociados: 'Viaje #4', estado: 'Pendiente' }].forEach(c => ops.push({ colName: 'carteraClientes', id: c.id, data: c }));
+
+    // 6. Directorio Clientes
+    [{ id: 1, nombre: 'John Jairo Silva', tipo: 'Equipos e Insumos', segmento: 'Comerciante', nit: '111111111-1', telefono: '310 000 0000', ubicacion: 'Buenaventura' },
+     { id: 2, nombre: 'Oscar', tipo: 'Comerciante de Madera', segmento: 'Persona Común', nit: '222222222', telefono: '312 000 0000', ubicacion: 'Satinga' },
+     { id: 3, nombre: 'Alex', tipo: 'Materiales Construcción', segmento: 'Comerciante', nit: '333333333-3', telefono: '315 000 0000', ubicacion: 'La Tola' },
+     { id: 4, nombre: 'Konny Hospital', tipo: 'Institucional / Salud', segmento: 'Proyecto', nit: '900000000-1', telefono: '318 000 0000', ubicacion: 'El Charco' },
+     { id: 5, nombre: 'Modesto', tipo: 'Socio / Proveedor', segmento: 'Interno', nit: 'N/A', telefono: '320 000 0000', ubicacion: 'Tumaco' }].forEach(c => ops.push({ colName: 'clientesDir', id: c.id, data: c }));
+
+    await window.dbHelper.saveBatch(ops);
+    alert("✅ Extracción y Siembra de Datos de Excel completada. Firebase ha sido actualizado.");
+    App.state.isSyncingData = false;
+    App.render();
+};
 
 // Inicialización del Sistema
 window.onload = () => {
@@ -1625,7 +1784,22 @@ window.onload = () => {
 
     // Conexión a Firebase: Ahora protege tus datos iniciales si la nube está vacía
     if (window.isFirebaseReady) {
-        signInAnonymously(auth).then(() => {
+        
+        // Módulo Asíncrono de Inyección de Token
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (err) {
+                console.error("Error Auth Firebase:", err);
+            }
+        };
+
+        // Ejecutar Handshake y luego activar Listeners
+        initAuth().then(() => {
             onAuthStateChanged(auth, (user) => {
                 if (user) {
                     currentUser = user;
@@ -1633,7 +1807,7 @@ window.onload = () => {
                     window.activeFirebaseListeners.forEach(unsub => unsub()); 
                     window.activeFirebaseListeners = [];
 
-                    const colecciones = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina'];
+                    const colecciones = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina', 'carteraViajes', 'carteraClientes'];
                     
                     colecciones.forEach(col => {
                         const colRef = collection(db, 'artifacts', appIdStr, 'public', 'data', col);
@@ -1648,7 +1822,6 @@ window.onload = () => {
                                 window.App.state[col] = []; 
                             }
                             // Si data.length es 0 pero NUNCA ha cargado (nube virgen), simplemente IGNORAMOS el snapshot.
-                            // Esto evita que tus DATOS SEMILLA desaparezcan y puedas pulsar "Sincronizar a la nube" tranquilo.
                             
                             window.App.render(); 
                         }, (error) => {
@@ -1659,7 +1832,7 @@ window.onload = () => {
                     });
                 }
             });
-        }).catch(err => console.error("Error Auth Firebase:", err));
+        });
     }
 };
 
