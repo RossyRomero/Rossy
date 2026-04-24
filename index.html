@@ -75,13 +75,14 @@ const parseCOP = (valueStr) => Number(valueStr.replace(/[^0-9.-]+/g,""));
 const App = {
     state: {
         activeTab: 'dashboard',
-        niifTab: 'informe-consolidado',
+        niifTab: 'estado-situacion',
         docTab: 'escaner',
         sociedadFiltroMes: 'Todos',
         carteraViajeFiltro: 'Todos',
         viajesFiltroMes: 'Todos',
         viajesFiltroRuta: 'Todos',
         informePdfFiltro: 'Todos',
+        dashboardChartFiltro: 'Todos',
         isUploading: false,
         uploadSuccess: false,
 
@@ -266,7 +267,7 @@ const App = {
         ]);
         
         // Agregar BOM para soporte UTF-8 en Excel
-        let csvContent = "\\uFEFF" + headers.join(",") + "\\n" + rows.map(e => e.join(",")).join("\\n");
+        let csvContent = "\uFEFF" + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
         
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
@@ -694,6 +695,11 @@ const App = {
                 <div class="lg:col-span-2 bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 h-[300px] lg:h-[400px] flex flex-col">
                     <div class="flex justify-between items-center mb-4">
                         <h3 class="text-sm font-bold text-slate-800 flex items-center"><i data-lucide="bar-chart-2" class="mr-2 text-blue-600 w-4 h-4"></i> Tendencia Financiera (M)</h3>
+                        <select onchange="App.setFilterVal('dashboardChartFiltro', this.value)" class="text-[10px] sm:text-xs font-bold border border-slate-200 rounded-lg p-1 outline-none text-slate-600 bg-slate-50">
+                            <option value="Todos" ${App.state.dashboardChartFiltro === 'Todos' ? 'selected' : ''}>Todo el Histórico</option>
+                            <option value="Ultimos2" ${App.state.dashboardChartFiltro === 'Ultimos2' ? 'selected' : ''}>Últimos 2 Periodos</option>
+                            <option value="Ultimo" ${App.state.dashboardChartFiltro === 'Ultimo' ? 'selected' : ''}>Último Periodo</option>
+                        </select>
                     </div>
                     <div class="flex-1 min-h-0 relative"><canvas id="lineChart"></canvas></div>
                 </div>
@@ -1082,163 +1088,7 @@ const App = {
                 </table>
             </div>`;
 
-        const vFiltroSoc = s.informePdfFiltro === 'Todos' ? s.viajes : s.viajes.filter(v => v.periodo === s.informePdfFiltro);
-        const utilidadPeriodoSoc = vFiltroSoc.reduce((acc, v) => acc + v.utilidadBruta, 0); 
-        const tasaRecup = ((t.utilidadNeta / t.inversionTotal) * 100).toFixed(2);
-        const apalanc = ((81900472 / t.utilidadNeta) * 100).toFixed(2);
-        const marNeto = ((t.utilidadNeta / t.ingresoTotal) * 100).toFixed(2);
-
-        const contentSociosPdf = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Rendimiento Societario e Indicadores Financieros</h3></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">El Módulo de Rendimiento Societario ilustra y justifica de forma equitativa el estado financiero de cada uno de los inversores según su porcentaje de participación. Expresa la proyección porcentual de recuperación (Tasa ROI), y detalla explícitamente qué parte de la utilidad causada por cada inversionista se transfiere directamente a liquidación de deuda o cartera pre-existente, arrojando así la masa líquida monetaria final con derecho a retiro y libre distribución.</p>
-            <div class="grid grid-cols-3 gap-4 mb-6 print:mb-4">
-                <div class="border rounded-xl p-4 bg-white shadow-sm text-center print:border-slate-300 print:shadow-none">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Tasa Recuperación</p>
-                    <p class="text-xl font-black text-blue-600 print:text-black">${tasaRecup}%</p>
-                </div>
-                <div class="border rounded-xl p-4 bg-white shadow-sm text-center print:border-slate-300 print:shadow-none">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Apalancamiento</p>
-                    <p class="text-xl font-black text-red-500 print:text-black">${apalanc}%</p>
-                </div>
-                <div class="border rounded-xl p-4 bg-white shadow-sm text-center print:border-slate-300 print:shadow-none">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Margen Neto Global</p>
-                    <p class="text-xl font-black text-green-600 print:text-black">${marNeto}%</p>
-                </div>
-            </div>
-            <div class="w-full overflow-x-auto table-scroll">
-                <table class="w-full text-left text-xs sm:text-sm border-collapse border">
-                    <thead>
-                        <tr class="bg-slate-100 text-slate-700 border-b">
-                            <th class="p-3 font-bold border-r">Inversionista</th>
-                            <th class="p-3 font-bold text-center border-r">% Part.</th>
-                            <th class="p-3 font-bold text-center border-r">ROI %</th>
-                            <th class="p-3 font-bold text-right border-r">Inversión Base</th>
-                            <th class="p-3 font-bold text-right border-r">Util. Causada</th>
-                            <th class="p-3 font-bold text-right border-r">Descuentos</th>
-                            <th class="p-3 font-bold text-right">Saldo Líquido</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${s.socios.map(socio => {
-                            const utilBruta = s.informePdfFiltro === 'Todos' ? socio.utilidadCausada : utilidadPeriodoSoc * (socio.porcentaje / 100);
-                            let liquido = utilBruta;
-                            if (socio.saldoMantenimiento < 0 && s.informePdfFiltro === 'Todos') {
-                                liquido = utilBruta - Math.abs(socio.saldoMantenimiento);
-                            }
-                            const roiSocio = ((utilBruta / socio.inversion) * 100).toFixed(1);
-                            return `
-                            <tr class="border-b">
-                                <td class="p-3 font-medium border-r">${socio.nombre}</td>
-                                <td class="p-3 text-center border-r font-bold text-blue-600 print:text-black">${socio.porcentaje}%</td>
-                                <td class="p-3 text-center border-r font-bold text-indigo-600 print:text-black">${roiSocio}%</td>
-                                <td class="p-3 text-right border-r">${formatCOP(socio.inversion)}</td>
-                                <td class="p-3 text-right border-r">${formatCOP(utilBruta)}</td>
-                                <td class="p-3 text-right border-r text-red-500 print:text-black">${socio.saldoMantenimiento < 0 ? formatCOP(socio.saldoMantenimiento) : '0'}</td>
-                                <td class="p-3 text-right font-bold ${liquido > 0 ? 'text-green-600' : 'text-red-600'} print:text-black">${formatCOP(liquido)}</td>
-                            </tr>`;
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>`;
-
-        if(s.niifTab === 'informe-consolidado') {
-            content = `
-            <div class="print:block" id="pdf-content">
-                <!-- PANEL DE CONTROLES NIIF (NO SE IMPRIME) -->
-                <div class="flex flex-col sm:flex-row justify-between items-center gap-4 mb-8 bg-slate-100 p-4 rounded-xl border border-slate-200 print:hidden">
-                    <div class="flex items-center w-full sm:w-auto">
-                        <span class="text-sm font-bold text-slate-600 mr-3">Filtrar:</span>
-                        <select onchange="App.setFilterVal('informePdfFiltro', this.value)" class="w-full sm:w-auto border border-slate-300 rounded-lg p-2.5 text-sm focus:ring focus:ring-blue-200 outline-none font-medium">
-                            <option value="Todos">Periodo Completo Histórico</option>
-                            ${s.informePeriodos.map(p => `<option value="${p.periodo}" ${s.informePdfFiltro === p.periodo ? 'selected':''}>${p.periodo}</option>`).join('')}
-                        </select>
-                    </div>
-                    <button onclick="window.print()" class="w-full sm:w-auto bg-red-600 text-white px-5 py-3 sm:py-2.5 rounded-xl text-sm font-black flex justify-center items-center hover:bg-red-700 transition shadow-sm">
-                        <i data-lucide="file-down" class="w-5 h-5 mr-2"></i> Exportar Informe en PDF
-                    </button>
-                </div>
-
-                <!-- CABECERA PARA IMPRESIÓN / VISUALIZACIÓN -->
-                <div class="text-center border-b-2 border-slate-800 pb-4 mb-6">
-                    <h1 class="text-lg sm:text-xl md:text-2xl font-black uppercase text-slate-900 mt-2 print:mt-0">Informe de Gestión Operativa y Financiera Consolidado</h1>
-                    <h2 class="text-sm sm:text-lg font-bold text-slate-700 mt-1">Empresa: Don Sebe - M/N Greicy Jireth</h2>
-                    <p class="text-xs sm:text-sm font-semibold text-slate-500 mt-2">Documento Generado Automáticamente • Filtro: ${s.informePdfFiltro}</p>
-                </div>
-
-                <!-- 1. COMPARATIVO -->
-                <div class="bg-white border rounded-xl overflow-hidden shadow-sm mb-6 print:shadow-none print:break-inside-avoid print:border-none">
-                    <div class="bg-slate-800 text-white p-3 font-bold text-xs sm:text-sm uppercase print:bg-slate-200 print:text-black">1. Comparativo de Ingresos y Utilidades</div>
-                    <div class="w-full overflow-x-auto table-scroll">
-                        <table class="w-full text-left text-xs sm:text-sm border-collapse">
-                            <thead>
-                                <tr class="bg-slate-100 text-slate-600 border-b print:bg-slate-100">
-                                    <th class="p-3 font-bold border-r">Periodo / Mes</th>
-                                    <th class="p-3 font-bold text-right border-r">Ingreso Proy.</th>
-                                    <th class="p-3 font-bold text-right border-r">Ingreso Real</th>
-                                    <th class="p-3 font-bold text-right border-r">Util. Proy.</th>
-                                    <th class="p-3 font-bold text-right text-green-700 border-r print:text-black">Util. Real</th>
-                                    <th class="p-3 font-bold text-right text-orange-600 print:text-black">Cartera Acum.</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${s.informePdfFiltro === 'Todos' ? `
-                                <tr class="bg-blue-50/50 border-b font-black text-slate-800 print:bg-transparent">
-                                    <td class="p-3 border-r">TOTAL ACUMULADO</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(296561210)}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(186146710)}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(112209000)}</td>
-                                    <td class="p-3 text-right text-green-700 border-r print:text-black">${formatCOP(88714000)}</td>
-                                    <td class="p-3 text-right text-orange-600 print:text-black">${formatCOP(110414500)}</td>
-                                </tr>` : ''}
-                                ${periodosInfo.map(p => `
-                                <tr class="border-b hover:bg-slate-50">
-                                    <td class="p-3 border-r font-medium">${p.periodo}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(p.ingresoProy)}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(p.ingresoReal)}</td>
-                                    <td class="p-3 text-right border-r">${formatCOP(p.utilProy)}</td>
-                                    <td class="p-3 text-right font-bold text-green-700 border-r print:text-black">${formatCOP(p.utilReal)}</td>
-                                    <td class="p-3 text-right font-bold text-orange-600 print:text-black">${formatCOP(p.cartera)}</td>
-                                </tr>`).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- 2. ANALISIS DE RIESGO Y CARTERA -->
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mt-6 print:block print-page-break">
-                    <div class="bg-red-50 border border-red-100 rounded-xl p-4 sm:p-5 shadow-sm print:bg-transparent print:border-slate-300 print:mb-4">
-                        <h3 class="font-black text-red-800 mb-2 sm:mb-3 flex items-center text-sm sm:text-base print:text-black"><i data-lucide="alert-triangle" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i> 2. Estado Crítico de Cartera</h3>
-                        <p class="text-xs sm:text-sm text-red-900 mb-2 print:text-black">El grueso de la deuda consolidada radica en clientes con acuerdos pendientes. Principales deudores a la fecha:</p>
-                        <ul class="list-disc list-inside text-xs sm:text-sm font-bold text-red-800 ml-1 sm:ml-2 space-y-1 print:text-black">
-                            <li>John Jairo Silva (${formatCOP(41300000)})</li>
-                            <li>Oscar Satinga (${formatCOP(31704500)})</li>
-                            <li>Alex La Tola (${formatCOP(31400000)})</li>
-                        </ul>
-                    </div>
-
-                    <div class="bg-blue-50 border border-blue-100 rounded-xl p-4 sm:p-5 shadow-sm print:bg-transparent print:border-slate-300">
-                        <h3 class="font-black text-blue-900 mb-2 sm:mb-3 flex items-center text-sm sm:text-base print:text-black"><i data-lucide="info" class="w-4 h-4 sm:w-5 sm:h-5 mr-2"></i> 3. Estado de Cuenta Socio 40% (PRI)</h3>
-                        <div class="space-y-2 text-xs sm:text-sm text-blue-900 print:text-black">
-                            <div class="flex justify-between border-b border-blue-200 pb-1 print:border-slate-300"><span>Utilidad Causada a Favor:</span><span class="font-bold text-green-700 print:text-black">+ ${formatCOP(69689184)}</span></div>
-                            <div class="flex justify-between border-b border-blue-200 pb-1 print:border-slate-300"><span>Deuda Mantenimiento (Capital):</span><span class="font-bold text-red-600 print:text-black">- ${formatCOP(81900472)}</span></div>
-                            <div class="flex justify-between pt-1 font-black text-sm sm:text-base"><span>Saldo Neto Resultante:</span><span class="text-red-700 print:text-black">${formatCOP(-12211288)}</span></div>
-                        </div>
-                        <p class="text-[10px] sm:text-xs text-blue-800 mt-3 italic print:text-slate-600">Conclusión: El socio no puede realizar retiros, ya que el mantenimiento absorbió sus utilidades. Saldo negativo cubierto con utilidades operativas futuras.</p>
-                    </div>
-                </div>
-
-                <!-- SECCIÓN OCULTA EN PANTALLA, CONDICIONAL EN IMPRESIÓN (PDF) SEGÚN AJUSTES -->
-                <div class="hidden print:block">
-                    ${App.state.config.pdfIncludes.balance ? `<div class="print-page-break">${contentBalance}</div>` : ''}
-                    ${App.state.config.pdfIncludes.resultados ? `<div class="print-page-break">${contentResultados}</div>` : ''}
-                    ${App.state.config.pdfIncludes.flujo ? `<div class="print-page-break">${contentFlujo}</div>` : ''}
-                    ${App.state.config.pdfIncludes.patrimonio ? `<div class="print-page-break">${contentPatrimonio}</div>` : ''}
-                    ${App.state.config.pdfIncludes.socios ? `<div class="print-page-break">${contentSociosPdf}</div>` : ''}
-                </div>
-                <!-- FIN SECCIÓN IMPRESIÓN CONDICIONAL -->
-
-            </div>`;
-        } else if(s.niifTab === 'estado-situacion') {
+        if(s.niifTab === 'estado-situacion') {
             content = contentBalance;
         } else if (s.niifTab === 'resultados') {
             content = contentResultados;
@@ -1249,7 +1099,6 @@ const App = {
         }
 
         const tabsNIIF = [
-            { id: 'informe-consolidado', label: 'Informe PDF' },
             { id: 'estado-situacion', label: 'Balance General' },
             { id: 'resultados', label: 'P&G' },
             { id: 'flujo-efectivo', label: 'Flujo Efectivo' },
@@ -1616,11 +1465,19 @@ const App = {
             const ctx = document.getElementById('lineChart');
             if(ctx) {
                 const s = App.state;
-                const labels = s.informePeriodos.map(p => p.periodo.split(' ')[0]); 
-                const ingresosBrutos = s.informePeriodos.map(p => p.ingresoProy); 
-                const utilidadesBrutas = s.informePeriodos.map(p => p.utilProy);
-                const utilidadesNetas = s.informePeriodos.map(p => p.utilReal); 
-                const costos = s.informePeriodos.map(p => p.ingresoProy - p.utilProy); 
+                
+                let dataToRender = s.informePeriodos;
+                if (s.dashboardChartFiltro === 'Ultimos2') {
+                    dataToRender = dataToRender.slice(-2);
+                } else if (s.dashboardChartFiltro === 'Ultimo') {
+                    dataToRender = dataToRender.slice(-1);
+                }
+
+                const labels = dataToRender.map(p => p.periodo.split(' ')[0]); 
+                const ingresosBrutos = dataToRender.map(p => p.ingresoProy); 
+                const utilidadesBrutas = dataToRender.map(p => p.utilProy);
+                const utilidadesNetas = dataToRender.map(p => p.utilReal); 
+                const costos = dataToRender.map(p => p.ingresoProy - p.utilProy); 
 
                 if(window.dashChart) window.dashChart.destroy();
                 window.dashChart = new Chart(ctx, {
