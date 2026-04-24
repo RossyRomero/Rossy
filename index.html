@@ -1716,50 +1716,69 @@ window.App = App;
 
 /**
  * ==========================================
- * SCRIPT DE MIGRACIÓN: BASE DE DATOS REAL EXCEL
+ * SCRIPT DE MIGRACIÓN: BASE DE DATOS REAL EXCEL (DATOS EXTRAÍDOS DE CSVs)
  * Totalmente desvinculada de la matriz general. Se inyecta exclusivamente bajo demanda.
  * ==========================================
  */
 window.runInitialMigration = async () => {
-    if (!confirm("⚠️ ¿Deseas inyectar los datos maestros del Excel a la Nube? Esto insertará los valores iniciales reales a Firebase de forma permanente.")) return;
+    if (!confirm("⚠️ ¿Deseas inyectar los datos maestros del Excel a la Nube? Esto insertará los valores iniciales reales extraídos de los archivos a Firebase de forma permanente.")) return;
     App.state.isSyncingData = true; App.render();
     const ops = [];
 
-    // 1. Cuentas
+    // 1. Cuentas (Cajas/Bancos extraídos de la contabilidad general)
     [{ id: 1, nombre: 'Banco Agrario Principal', tipo: 'banco', saldoInicial: 10000000, numero: '123-456-789' },
-     { id: 2, nombre: 'Caja Fuerte (Barco)', tipo: 'caja', saldoInicial: 5000000, numero: 'Efectivo' },
+     { id: 2, nombre: 'Efectivo Barcos (Caja Fuerte)', tipo: 'caja', saldoInicial: 3731255, numero: 'Efectivo' },
      { id: 3, nombre: 'Caja Menor Operativa', tipo: 'caja_menor', saldoInicial: 1500000, numero: 'Efectivo' }].forEach(c => ops.push({ colName: 'cuentas', id: c.id, data: c }));
 
-    // 2. Socios
-    [{ id: 1, nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -81900472, utilidadCausada: 69689184 },
-     { id: 2, nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0, utilidadCausada: 67946954 },
-     { id: 3, nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0, utilidadCausada: 26133444 },
-     { id: 4, nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0, utilidadCausada: 3867751 },
-     { id: 5, nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0, utilidadCausada: 3379991 },
-     { id: 6, nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0, utilidadCausada: 2961849 }].forEach(s => ops.push({ colName: 'socios', id: s.id, data: s }));
+    // 2. Socios (De archivos Enel-Luz, Roel, Ronel, Royner, Ross, Pri y Utilidades mensual)
+    [{ id: 1, nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -81900472, utilidadCausada: 88998444 },
+     { id: 2, nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0, utilidadCausada: 86773482 },
+     { id: 3, nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0, utilidadCausada: 33374416 },
+     { id: 4, nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0, utilidadCausada: 4939413 },
+     { id: 5, nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0, utilidadCausada: 4316335 },
+     { id: 6, nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0, utilidadCausada: 3782438 }].forEach(s => ops.push({ colName: 'socios', id: s.id, data: s }));
 
-    // 3. Viajes (Datos Reales extraidos del CSV)
+    // 3. Viajes (Datos Reales extraídos de "Viajes .csv", "Sheet6.csv" y "Utilidades mensual .csv")
     [{ id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, utilidadBruta: 37849000, cartera: 12411000, ingresoRecaudado: 54545000, observaciones: 'Madera bajada Satinga', clientesAsociados: 'Oscar, Pepe', productos: 'Madera Aserrada', pagoFlete: 54545000, pagoCargue: 2000000 },
      { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, utilidadBruta: 28100000, cartera: 11084000, ingresoRecaudado: 35356300, observaciones: 'Madera de exportación', clientesAsociados: 'Oscar', productos: 'Madera Fina', pagoFlete: 35356300, pagoCargue: 1500000 },
      { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, utilidadBruta: 46260000, cartera: 0, ingresoRecaudado: 73131000, observaciones: 'Flete completo pagado', clientesAsociados: 'Konny Hospital', productos: 'Equipos Médicos', pagoFlete: 73131000, pagoCargue: 3000000 },
      { id: 4, fecha: '2025-12-02', viaje: 'Viaje #4', periodo: 'Dic 2025', ruta: 'B/tura - Charco', ingreso: 80023500, gastos: 22800000, utilidadBruta: 57223500, cartera: 32119500, ingresoRecaudado: 47904000, observaciones: 'Tubos, Grava, Varillas Tola', clientesAsociados: 'Alex, Oscar', productos: 'Material Construcción, Madera', pagoFlete: 47904000, pagoCargue: 4500000 },
-     { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', periodo: 'Dic 2025', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, utilidadBruta: 18820000, cartera: 0, ingresoRecaudado: 34820000, observaciones: 'Viaje Tumaco sin cartera', clientesAsociados: 'Modesto', productos: 'Víveres y Abarrotes', pagoFlete: 34820000, pagoCargue: 1200000 }].forEach(v => ops.push({ colName: 'viajes', id: v.id, data: v }));
+     { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', periodo: 'Dic 2025', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, utilidadBruta: 18820000, cartera: 0, ingresoRecaudado: 34820000, observaciones: 'Viaje Tumaco sin cartera', clientesAsociados: 'Modesto', productos: 'Víveres y Abarrotes', pagoFlete: 34820000, pagoCargue: 1200000 },
+     { id: 6, fecha: '2026-01-15', viaje: 'Viaje #6', periodo: 'Ene 2026', ruta: 'B/tura - General', ingreso: 150000000, gastos: 42874400, utilidadBruta: 107125600, cartera: 54800000, ingresoRecaudado: 95200000, observaciones: 'Consolidado Enero 2026 (Sheet6)', clientesAsociados: 'Jhon Jairo Silva, Alex', productos: 'Equipos, Cemento, Grava', pagoFlete: 95200000, pagoCargue: 5000000 }].forEach(v => ops.push({ colName: 'viajes', id: v.id, data: v }));
 
-    // 4. Cartera Viajes
+    // 4. Cartera Viajes (Cruzada con "Cartera Greicy .csv" y "Sheet6.csv")
     [{ id: 1, idViaje: 1, viaje: 'Viaje #1', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 12411000, fecha: '2025-10-25' },
      { id: 2, idViaje: 2, viaje: 'Viaje #2', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 11084000, fecha: '2025-11-09' },
      { id: 3, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Tubos / Grava La Tola', valor: 13000000, fecha: '2025-12-02' },
      { id: 4, idViaje: 4, viaje: 'Viaje #4', cliente: 'Konny Hospital', concepto: 'Proyecto Hospital', valor: 1000000, fecha: '2025-12-02' },
      { id: 5, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Varillas Tola', valor: 4900000, fecha: '2025-12-02' },
-     { id: 6, idViaje: 4, viaje: 'Viaje #4', cliente: 'Oscar', concepto: 'Madera bajada', valor: 8209500, fecha: '2025-12-02' }].forEach(c => ops.push({ colName: 'carteraViajes', id: c.id, data: c }));
+     { id: 6, idViaje: 4, viaje: 'Viaje #4', cliente: 'Oscar', concepto: 'Madera bajada', valor: 8209500, fecha: '2025-12-02' },
+     { id: 7, idViaje: 6, viaje: 'Viaje #6', cliente: 'John Jairo Silva', concepto: 'Equipos e insumos', valor: 41300000, fecha: '2026-01-15' },
+     { id: 8, idViaje: 6, viaje: 'Viaje #6', cliente: 'Alex', concepto: 'Tubo Proyecto', valor: 8000000, fecha: '2026-01-15' },
+     { id: 9, idViaje: 6, viaje: 'Viaje #6', cliente: 'Varios', concepto: 'Saldo Enero', valor: 5500000, fecha: '2026-01-15' }].forEach(c => ops.push({ colName: 'carteraViajes', id: c.id, data: c }));
 
-    // 5. Cartera Clientes
-    [{ id: 1, cliente: 'John Jairo Silva', conceptoGeneral: 'Equipos e insumos', valorTotal: 41300000, viajesAsociados: 'Histórico', estado: 'Pendiente' },
+    // 5. Cartera Clientes Consolidada
+    [{ id: 1, cliente: 'John Jairo Silva', conceptoGeneral: 'Equipos e insumos', valorTotal: 41300000, viajesAsociados: 'Viaje #6', estado: 'Pendiente' },
      { id: 2, cliente: 'Oscar', conceptoGeneral: 'Madera bajada (Satinga)', valorTotal: 31704500, viajesAsociados: 'Viaje #1, #2, #4', estado: 'Pendiente' },
-     { id: 3, cliente: 'Alex', conceptoGeneral: 'Materiales construcción Tola', valorTotal: 31400000, viajesAsociados: 'Viaje #4 y otros', estado: 'Pendiente' },
+     { id: 3, cliente: 'Alex', conceptoGeneral: 'Materiales construcción Tola', valorTotal: 25900000, viajesAsociados: 'Viaje #4, #6', estado: 'Pendiente' },
      { id: 4, cliente: 'Konny Hospital', conceptoGeneral: 'Transporte Hospital', valorTotal: 1000000, viajesAsociados: 'Viaje #4', estado: 'Pendiente' }].forEach(c => ops.push({ colName: 'carteraClientes', id: c.id, data: c }));
 
-    // 6. Directorio Clientes
+    // 6. Transacciones (Gastos de "Efectivo Barcos.csv" y "Pago Utilidades .csv")
+    [{ id: 101, cuentaId: 2, tipo: 'egreso', monto: 1900000, fecha: '2026-01-26', concepto: 'Aceite Greicy', modulo: 'Mantenimiento' },
+     { id: 102, cuentaId: 2, tipo: 'egreso', monto: 1000000, fecha: '2026-01-26', concepto: 'Modesto Capital Greicy', modulo: 'Tesoreria' },
+     { id: 103, cuentaId: 2, tipo: 'egreso', monto: 1000000, fecha: '2026-01-25', concepto: 'Utilidades Roel Nov-Dic 2025', modulo: 'Socios' },
+     { id: 104, cuentaId: 2, tipo: 'egreso', monto: 3458000, fecha: '2026-01-28', concepto: 'Combustible Karina Mar', modulo: 'Gastos' },
+     { id: 105, cuentaId: 2, tipo: 'egreso', monto: 260000, fecha: '2026-01-28', concepto: 'Agencia Enero y Zarpe Greicy', modulo: 'Viajes' },
+     { id: 106, cuentaId: 2, tipo: 'egreso', monto: 2800000, fecha: '2026-01-28', concepto: 'Muelle B/tura Greicy y Karina', modulo: 'Gastos' },
+     { id: 107, cuentaId: 2, tipo: 'egreso', monto: 700000, fecha: '2026-01-28', concepto: 'NGS Karina Mar Don Heberto', modulo: 'Mantenimiento' },
+     { id: 108, cuentaId: 2, tipo: 'egreso', monto: 850000, fecha: '2026-01-30', concepto: 'Vigilancia Karina Dic - Ene 27 2026', modulo: 'Gastos' },
+     { id: 109, cuentaId: 2, tipo: 'egreso', monto: 10000000, fecha: '2025-12-28', concepto: 'Pago Utilidades PRI (Dic)', modulo: 'Socios' },
+     { id: 110, cuentaId: 2, tipo: 'egreso', monto: 15000000, fecha: '2025-12-30', concepto: 'Pago Utilidades PRI (Dic)', modulo: 'Socios' },
+     { id: 111, cuentaId: 2, tipo: 'egreso', monto: 5000000, fecha: '2026-02-15', concepto: 'Pago Utilidades PRI', modulo: 'Socios' },
+     { id: 112, cuentaId: 2, tipo: 'egreso', monto: 2000000, fecha: '2026-04-16', concepto: 'Pago Utilidades PRI', modulo: 'Socios' }
+    ].forEach(t => ops.push({ colName: 'transacciones', id: t.id, data: t }));
+
+    // 7. Directorio Clientes
     [{ id: 1, nombre: 'John Jairo Silva', tipo: 'Equipos e Insumos', segmento: 'Comerciante', nit: '111111111-1', telefono: '310 000 0000', ubicacion: 'Buenaventura' },
      { id: 2, nombre: 'Oscar', tipo: 'Comerciante de Madera', segmento: 'Persona Común', nit: '222222222', telefono: '312 000 0000', ubicacion: 'Satinga' },
      { id: 3, nombre: 'Alex', tipo: 'Materiales Construcción', segmento: 'Comerciante', nit: '333333333-3', telefono: '315 000 0000', ubicacion: 'La Tola' },
@@ -1767,7 +1786,7 @@ window.runInitialMigration = async () => {
      { id: 5, nombre: 'Modesto', tipo: 'Socio / Proveedor', segmento: 'Interno', nit: 'N/A', telefono: '320 000 0000', ubicacion: 'Tumaco' }].forEach(c => ops.push({ colName: 'clientesDir', id: c.id, data: c }));
 
     await window.dbHelper.saveBatch(ops);
-    alert("✅ Extracción y Siembra de Datos de Excel completada. Firebase ha sido actualizado.");
+    alert("✅ Extracción exhaustiva de Datos de Excel completada.\nSe han sincronizado en Firestore:\n- Socios e Inversiones Reales\n- 6 Viajes (Octubre a Enero)\n- Cartera Detallada (Jhon Jairo, Oscar, Alex...)\n- Transacciones de Efectivo Barcos y Pagos de Utilidades.");
     App.state.isSyncingData = false;
     App.render();
 };
