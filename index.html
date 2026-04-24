@@ -51,7 +51,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, collection, doc, setDoc, getDoc, deleteDoc, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 /**
  * ==========================================
@@ -76,12 +76,20 @@ window.hasLoadedFromCloud = {}; // PARCHE: Bóveda protectora para evitar que la
 
 const appIdStr = typeof __app_id !== 'undefined' ? __app_id : "don-sebe-erp";
 
-// Inicialización Segura Dinámica
+// Inicialización Segura Dinámica con Motor Offline Nativo (IndexedDB)
 try {
     const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
-    db = getFirestore(app);
+    
+    // HABILITAR PERSISTENCIA LOCAL NATIVA (Soporte Offline Total y Automático)
+    try {
+        db = initializeFirestore(app, { localCache: persistentLocalCache() });
+        console.log("📦 Motor Offline de Firebase activado (IndexedDB).");
+    } catch (e) {
+        db = getFirestore(app); // Fallback de seguridad
+    }
+    
     window.isFirebaseReady = true;
 } catch (error) {
     console.error("🔥 Error inicializando Firebase. Cargando en Modo Local Estricto:", error);
@@ -89,60 +97,49 @@ try {
 
 /**
  * ==========================================
- * 2. MOTOR HÍBRIDO DE DATOS (DELTA SYNC)
+ * 2. MOTOR HÍBRIDO DE DATOS (OFFLINE FIRST)
  * ==========================================
  */
 window.dbHelper = {
     save: async (colName, id, data) => {
-        // 1. Guardado Optimista Inmediato (Local)
+        // 1. Actualización Optimista Inmediata (UI Instantánea)
         const idx = App.state[colName].findIndex(x => x.id === id);
         if(idx !== -1) App.state[colName][idx] = { ...App.state[colName][idx], ...data };
         else App.state[colName].push({ id, ...data });
-
-        // 2. Evaluación de Red y Envío a la Nube
-        if (window.isFirebaseReady && currentUser && navigator.onLine) {
-            try {
-                await setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()), data, { merge: true });
-            } catch(e) {
-                console.warn("Fallo escritura en vivo. Encolando delta...", e);
-                if(!App.state.syncQueue.find(x => x.type === 'single' && x.colName === colName && x.id === id)) App.state.syncQueue.push({type: 'single', colName, id, data});
-            }
-        } else {
-            if(!App.state.syncQueue.find(x => x.type === 'single' && x.colName === colName && x.id === id)) App.state.syncQueue.push({type: 'single', colName, id, data});
-        }
         window.App.render();
+
+        // 2. Delegación a Firebase (Se encola solo en el disco si no hay internet)
+        if (window.isFirebaseReady && currentUser) {
+            setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()), data, { merge: true })
+                .catch(e => console.warn("Guardado encolado para próxima conexión...", e));
+        }
     },
     saveBatch: async (operations) => {
-        // CORRECCIÓN ATÓMICA: Transacciones múltiples (Viajes, Nómina, Transferencias)
+        // Actualización Optimista Múltiple
         operations.forEach(op => {
             const idx = App.state[op.colName].findIndex(x => x.id === op.id);
             if(idx !== -1) App.state[op.colName][idx] = { ...App.state[op.colName][idx], ...op.data };
             else App.state[op.colName].push({ id: op.id, ...op.data });
         });
-
-        if (window.isFirebaseReady && currentUser && navigator.onLine) {
-            try {
-                const batch = writeBatch(db);
-                operations.forEach(op => {
-                    const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
-                    batch.set(ref, op.data, { merge: true });
-                });
-                await batch.commit();
-            } catch(e) {
-                console.warn("Fallo en Batch. Encolando lote atómico...");
-                App.state.syncQueue.push({ type: 'batch', operations });
-            }
-        } else {
-            App.state.syncQueue.push({ type: 'batch', operations });
-        }
         window.App.render();
+
+        // Delegación Atómica a Firebase
+        if (window.isFirebaseReady && currentUser) {
+            const batch = writeBatch(db);
+            operations.forEach(op => {
+                const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
+                batch.set(ref, op.data, { merge: true });
+            });
+            batch.commit().catch(e => console.warn("Lote de operaciones encolado offline...", e));
+        }
     },
     remove: async (colName, id) => {
+        App.state[colName] = App.state[colName].filter(x => x.id !== id);
+        window.App.render();
+        
         if (window.isFirebaseReady && currentUser) {
-            await deleteDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()));
-        } else {
-            App.state[colName] = App.state[colName].filter(x => x.id !== id);
-            window.App.render();
+            deleteDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()))
+                .catch(e => console.warn("Borrado encolado para próxima conexión...", e));
         }
     }
 };
@@ -161,9 +158,7 @@ const App = {
         activeTab: 'dashboard', niifTab: 'estado-situacion', docTab: 'escaner',
         uploadSuccess: false, isFabOpen: false, isSyncingData: false,
         carteraViajeFiltro: 'Todos',
-        syncQueue: [], // NUEVA BÓVEDA: Guarda solo las mutaciones offline pendientes
-        lastSyncTime: null,
-
+        
         selectedViaje: null, selectedCliente: null, selectedSocio: null,
         isAddViajeOpen: false, isAddClienteOpen: false, isAddNominaOpen: false, isAddSocioOpen: false, isTransferOpen: false, isAddCuentaOpen: false, isAddTransaccionOpen: false,
         editingViajeId: null, editingClienteId: null, editingSocioId: null, editingCuentaId: null,
@@ -225,46 +220,6 @@ const App = {
     setFilterVal: (key, val) => { App.state[key] = val; App.render(); },
     togglePdfConfig: (key) => { App.state.config.pdfIncludes[key] = !App.state.config.pdfIncludes[key]; App.render(); },
     
-    // Motor de Auto-Guardado Inteligente (Daemon) - CORREGIDO (Evita Race Conditions)
-    autoSyncDaemon: async () => {
-        if (!window.isFirebaseReady || !currentUser || !navigator.onLine || App.state.syncQueue.length === 0 || App.state.isSyncingData) return;
-        
-        App.state.isSyncingData = true; App.render();
-
-        while(App.state.syncQueue.length > 0) {
-            const task = App.state.syncQueue[0];
-            try {
-                if (task.type === 'batch') {
-                    const batch = writeBatch(db);
-                    task.operations.forEach(op => {
-                        const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
-                        batch.set(ref, op.data, { merge: true });
-                    });
-                    await batch.commit();
-                } else {
-                    await setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', task.colName, task.id.toString()), task.data, { merge: true });
-                }
-                // Solo se elimina de la cola si la subida fue exitosa
-                App.state.syncQueue.shift(); 
-            } catch(e) {
-                console.error("Auto-Sync detenido por intermitencia de red. Preservando integridad...", e);
-                break; // Rompe el ciclo, preservando el orden exacto de los cambios restantes
-            }
-        }
-        
-        App.state.lastSyncTime = new Date();
-        App.state.isSyncingData = false;
-        App.render();
-    },
-
-    // Forzador Manual Optimizado
-    syncToCloud: async () => {
-        if (!window.isFirebaseReady || !currentUser) { alert("⚠️ Modo Offline. Revisa tus llaves o tu internet."); return; }
-        if (App.state.syncQueue.length === 0) { alert("✅ Sistema optimizado: No hay cambios locales pendientes para subir. Todo está sincronizado."); return; }
-        await App.autoSyncDaemon();
-        if (App.state.syncQueue.length === 0) alert("✅ Auto-Guardado Diferencial Completado con éxito.");
-    },
-
     setUIConfig: (key, val) => { App.state.config.ui[key] = val; App.applyTheme(); App.render(); },
     applyTheme: () => {
         const ui = App.state.config.ui; const root = document.documentElement;
@@ -913,58 +868,11 @@ const App = {
 
             <div class="bg-blue-50 rounded-2xl shadow-sm border border-blue-200 p-6 max-w-2xl relative overflow-hidden">
                 <div class="absolute top-0 right-0 p-4"><i data-lucide="cloud" class="w-20 h-20 text-blue-200 opacity-50"></i></div>
-                <h3 class="font-bold text-lg text-blue-900 mb-2 border-b border-blue-200 pb-3 flex items-center relative z-10"><i data-lucide="cloud-cog" class="w-5 h-5 mr-2 text-blue-600"></i> Infraestructura en la Nube (Firebase)</h3>
-                <p class="text-xs text-blue-800 mb-5 relative z-10">El sistema opera bajo un Motor de Auto-Guardado Inteligente. Los cambios se suben silenciosamente en segundo plano. Si creas datos sin internet, se encolarán y subirán solos al reconectar.</p>
-                <div class="flex items-center space-x-3 mb-4 relative z-10"><div class="w-3 h-3 rounded-full ${window.isFirebaseReady ? 'bg-green-500 animate-pulse' : 'bg-red-500'}"></div><span class="text-sm font-bold text-blue-900">${window.isFirebaseReady ? 'Conexión Segura con Firebase Activa' : 'Modo Seguro Offline Activo'}</span></div>
-                <button onclick="App.syncToCloud()" ${App.state.isSyncingData ? 'disabled':''} class="relative z-10 w-full sm:w-auto bg-blue-600 text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center hover:bg-blue-700 transition shadow-sm disabled:opacity-50">
-                    <i data-lucide="${App.state.isSyncingData ? 'loader' : 'cloud-upload'}" class="w-5 h-5 mr-2 ${App.state.isSyncingData ? 'animate-spin' : ''}"></i> Forzar Guardado Pendiente
-                </button>
+                <h3 class="font-bold text-lg text-blue-900 mb-2 border-b border-blue-200 pb-3 flex items-center relative z-10"><i data-lucide="cloud-cog" class="w-5 h-5 mr-2 text-blue-600"></i> Motor Offline-First Activo</h3>
+                <p class="text-xs text-blue-800 mb-5 relative z-10">El sistema cuenta con caché dura (IndexedDB). Si pierdes la conexión, la app seguirá funcionando con los datos locales. Todos los cambios, registros o eliminaciones se encolarán silenciosamente y se fusionarán con la nube apenas recuperes la red.</p>
+                <div class="flex items-center space-x-3 mb-4 relative z-10"><div class="w-3 h-3 rounded-full ${navigator.onLine ? 'bg-green-500 animate-pulse' : 'bg-orange-500'}"></div><span class="text-sm font-bold text-blue-900">${navigator.onLine ? 'Sincronización en Tiempo Real Activa' : 'Modo Operación Local (Sin Internet)'}</span></div>
             </div>
             
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
-                <h3 class="font-bold text-lg text-slate-800 mb-4 border-b pb-3 flex items-center"><i data-lucide="palette" class="w-5 h-5 mr-2 text-slate-400"></i> Personalización de Interfaz</h3>
-                <div class="space-y-4">
-                    <div class="flex items-center justify-between p-3 border rounded-xl hover:bg-slate-50 transition-colors">
-                        <div><p class="text-sm font-bold text-slate-700">Modo Oscuro Automático</p><p class="text-[10px] text-slate-400">Invierte paleta de colores para lectura nocturna.</p></div>
-                        <label class="relative inline-flex items-center cursor-pointer">
-                          <input type="checkbox" ${ui.isDark ? 'checked':''} onchange="App.setUIConfig('isDark', this.checked)" class="sr-only peer">
-                          <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
-                        </label>
-                    </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="space-y-1">
-                            <label class="text-xs font-bold text-slate-500 uppercase">Fondo Global</label>
-                            <input type="color" value="${ui.bgColor}" onchange="App.setUIConfig('bgColor', this.value)" ${ui.isDark ? 'disabled opacity-50':''} class="w-full h-10 rounded cursor-pointer border border-slate-200 p-1">
-                        </div>
-                        <div class="space-y-1">
-                            <label class="text-xs font-bold text-slate-500 uppercase">Texto Base</label>
-                            <input type="color" value="${ui.textColor}" onchange="App.setUIConfig('textColor', this.value)" ${ui.isDark ? 'disabled opacity-50':''} class="w-full h-10 rounded cursor-pointer border border-slate-200 p-1">
-                        </div>
-                    </div>
-                    <div class="space-y-1 mt-2">
-                        <label class="text-xs font-bold text-slate-500 uppercase">Tamaño de Texto</label>
-                        <select onchange="App.setUIConfig('textSize', this.value)" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none font-medium bg-white">
-                            <option value="small" ${ui.textSize==='small'?'selected':''}>Pequeño (14px)</option>
-                            <option value="normal" ${ui.textSize==='normal'?'selected':''}>Normal (16px)</option>
-                            <option value="large" ${ui.textSize==='large'?'selected':''}>Grande (18px)</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
-                <h3 class="font-bold text-lg text-slate-800 mb-4 border-b pb-3 flex items-center"><i data-lucide="hard-drive" class="w-5 h-5 mr-2 text-slate-400"></i> Copias de Seguridad Locales</h3>
-                <p class="text-xs text-slate-500 mb-5">Exporta el registro tabular de ingresos y fletes en formato CSV compatible con Microsoft Excel y Google Sheets. Útil para contabilidad externa.</p>
-                <div class="flex flex-col sm:flex-row gap-3">
-                    <button onclick="App.exportToExcel()" class="w-full sm:w-auto bg-green-600 text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-700 transition shadow-sm">
-                        <i data-lucide="file-spreadsheet" class="w-5 h-5 mr-2"></i> Exportar BD a Excel (.csv)
-                    </button>
-                    <button onclick="window.runInitialMigration()" class="w-full sm:w-auto bg-slate-800 text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center hover:bg-slate-900 transition shadow-sm">
-                        <i data-lucide="database-zap" class="w-5 h-5 mr-2 text-yellow-400"></i> Inyectar Excel Original
-                    </button>
-                </div>
-            </div>
-
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl mt-6">
                 <h3 class="font-bold text-lg text-slate-800 mb-2 border-b pb-3 flex items-center"><i data-lucide="file-text" class="w-5 h-5 mr-2 text-slate-400"></i> Opciones de Informe PDF (NIIF)</h3>
                 <p class="text-xs text-slate-500 mb-5">Activa o desactiva los submódulos que deseas anexar al final del "Informe Consolidado" al momento de presionar Exportar PDF. Esto te permite generar un documento más corto si solo requieres los datos operativos.</p>
@@ -1639,7 +1547,9 @@ const App = {
                     ${App.state.activeTab !== 'dashboard' ? `<button onclick="window.App.setTab('dashboard')" class="mr-3 sm:mr-4 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
                     <h1 onclick="window.App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> Don Sebe</h1>
                 </div>
-                <div class="bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold shadow-md flex items-center transition-all min-w-[120px] justify-center">${syncStatusUI}</div>
+                <div class="bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold shadow-md flex items-center transition-all min-w-[120px] justify-center">
+                    ${navigator.onLine ? `<div class="w-2 h-2 bg-green-400 rounded-full mr-2 shadow-[0_0_8px_rgba(74,222,128,0.5)]"></div> En Línea (Sincronizado)` : `<div class="w-2 h-2 bg-orange-400 rounded-full mr-2"></div> Modo Local (Offline)`}
+                </div>
             </header>
             
             <main class="flex-1 overflow-y-auto p-4 md:p-6 pb-8 bg-slate-50 print:bg-white print:p-0 print:overflow-visible">
@@ -1720,9 +1630,9 @@ window.App = App;
  * Totalmente desvinculada de la matriz general. Se inyecta exclusivamente bajo demanda.
  * ==========================================
  */
-window.runInitialMigration = async () => {
-    if (!confirm("⚠️ ¿Deseas inyectar los datos maestros del Excel a la Nube? Esto insertará los valores iniciales reales extraídos de los archivos a Firebase de forma permanente.")) return;
-    App.state.isSyncingData = true; App.render();
+window.runInitialMigration = async (silent = false) => {
+    if (!silent && !confirm("⚠️ ¿Deseas inyectar los datos maestros del Excel a la Nube? Esto insertará los valores iniciales reales extraídos de los archivos a Firebase de forma permanente.")) return;
+    
     const ops = [];
 
     // 1. Cuentas (Cajas/Bancos extraídos de la contabilidad general)
@@ -1786,8 +1696,7 @@ window.runInitialMigration = async () => {
      { id: 5, nombre: 'Modesto', tipo: 'Socio / Proveedor', segmento: 'Interno', nit: 'N/A', telefono: '320 000 0000', ubicacion: 'Tumaco' }].forEach(c => ops.push({ colName: 'clientesDir', id: c.id, data: c }));
 
     await window.dbHelper.saveBatch(ops);
-    alert("✅ Extracción exhaustiva de Datos de Excel completada.\nSe han sincronizado en Firestore:\n- Socios e Inversiones Reales\n- 6 Viajes (Octubre a Enero)\n- Cartera Detallada (Jhon Jairo, Oscar, Alex...)\n- Transacciones de Efectivo Barcos y Pagos de Utilidades.");
-    App.state.isSyncingData = false;
+    if (!silent) alert("✅ Extracción exhaustiva de Datos de Excel completada.\nSe han sincronizado en Firestore:\n- Socios e Inversiones Reales\n- 6 Viajes (Octubre a Enero)\n- Cartera Detallada (Jhon Jairo, Oscar, Alex...)\n- Transacciones de Efectivo Barcos y Pagos de Utilidades.");
     App.render();
 };
 
@@ -1796,10 +1705,9 @@ window.onload = () => {
     window.App.applyTheme();
     window.App.render();
     
-    // Arranque del Daemon de Auto-Guardado (Ejecuta cada 45 Segundos silenciosamente)
-    setInterval(() => { window.App.autoSyncDaemon(); }, 45000);
-    // Disparador de Interrupción: Auto-guardar en el microsegundo que recuperemos la red
-    window.addEventListener('online', window.App.autoSyncDaemon);
+    // Actualizar UI al recuperar o perder conexión
+    window.addEventListener('online', () => window.App.render());
+    window.addEventListener('offline', () => window.App.render());
 
     // Conexión a Firebase: Ahora protege tus datos iniciales si la nube está vacía
     if (window.isFirebaseReady) {
@@ -1819,10 +1727,24 @@ window.onload = () => {
 
         // Ejecutar Handshake y luego activar Listeners
         initAuth().then(() => {
-            onAuthStateChanged(auth, (user) => {
+            onAuthStateChanged(auth, async (user) => {
                 if (user) {
                     currentUser = user;
                     
+                    // 1. AUTO-INYECCIÓN (SEEDING) AL INICIAR SESIÓN POR PRIMERA VEZ
+                    const sysRef = doc(db, 'artifacts', appIdStr, 'public', 'data', '_system', 'metadata');
+                    try {
+                        const sysSnap = await getDoc(sysRef);
+                        if (!sysSnap.exists()) {
+                            console.log("🚀 Base de datos inicial en blanco. Inyectando configuración por defecto automáticamente...");
+                            await window.runInitialMigration(true); // true = Modo silencioso
+                            await setDoc(sysRef, { initialized: true, createdAt: new Date().toISOString() });
+                        }
+                    } catch (e) {
+                        console.warn("Validación de primer inicio omitida por modo Offline total.");
+                    }
+
+                    // 2. Activar Listeners con caché integrada
                     window.activeFirebaseListeners.forEach(unsub => unsub()); 
                     window.activeFirebaseListeners = [];
 
