@@ -14,11 +14,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
 
-    <!-- FIREBASE COMPAT LIBRARIES (Solución a Pantalla Blanca por CORS) -->
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth-compat.js"></script>
-
     <style>
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -53,14 +48,17 @@
 
     <div id="app-root" class="flex flex-col h-full w-full relative"></div>
 
-<!-- Usamos un script estándar (NO module) para compatibilidad total offline y online -->
-<script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
 /**
  * ==========================================
- * 1. CONFIGURACIÓN FIREBASE (COMPAT)
+ * 1. CONFIGURACIÓN FIREBASE 
  * ==========================================
  */
-const firebaseConfig = {
+const fallbackConfig = {
     apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
     authDomain: "nexus-jr.firebaseapp.com",
     projectId: "nexus-jr",
@@ -69,92 +67,86 @@ const firebaseConfig = {
     appId: "1:273022472068:web:74cf3c09e664d2a9f2d7d1"
 };
 
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
+const appIdStr = typeof __app_id !== 'undefined' ? __app_id : "don-sebe-erp";
+
 let auth = null;
 let db = null;
 window.isFirebaseReady = false;
 let currentUser = null;
-const appIdStr = "don-sebe-erp";
+window.activeFirebaseListeners = [];
+window.hasLoadedFromCloud = {}; 
 
-// Inicialización Segura
 try {
-    if (!firebase.apps.length) {
-        firebase.initializeApp(firebaseConfig);
-    }
-    auth = firebase.auth();
-    db = firebase.firestore();
+    const app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
     window.isFirebaseReady = true;
 } catch (error) {
-    console.error("🔥 Error inicializando Firebase. Cargando en Modo Local Estricto:", error);
+    console.error("🔥 Error inicializando Firebase:", error);
 }
 
 /**
  * ==========================================
- * 2. MOTOR HÍBRIDO DE DATOS (CLOUD / LOCAL)
+ * 2. MOTOR HÍBRIDO DE DATOS (DELTA SYNC)
  * ==========================================
  */
 window.dbHelper = {
     save: async (colName, id, data) => {
-        if (window.isFirebaseReady && currentUser) {
-            await db.collection('artifacts').doc(appIdStr).collection('public').doc('data').collection(colName).doc(id.toString()).set(data, { merge: true });
+        const idx = App.state[colName].findIndex(x => x.id === id);
+        if(idx !== -1) App.state[colName][idx] = { ...App.state[colName][idx], ...data };
+        else App.state[colName].push({ id, ...data });
+
+        if (window.isFirebaseReady && currentUser && navigator.onLine) {
+            try {
+                await setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()), data, { merge: true });
+            } catch(e) {
+                if(!App.state.syncQueue.find(x => x.colName === colName && x.id === id)) App.state.syncQueue.push({colName, id, data});
+            }
         } else {
-            const idx = App.state[colName].findIndex(x => x.id === id);
-            if(idx !== -1) App.state[colName][idx] = { ...App.state[colName][idx], ...data };
-            else App.state[colName].push({ id, ...data });
-            App.render();
+            if(!App.state.syncQueue.find(x => x.colName === colName && x.id === id)) App.state.syncQueue.push({colName, id, data});
         }
+        window.App.render();
     },
     remove: async (colName, id) => {
         if (window.isFirebaseReady && currentUser) {
-            await db.collection('artifacts').doc(appIdStr).collection('public').doc('data').collection(colName).doc(id.toString()).delete();
+            await deleteDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()));
         } else {
             App.state[colName] = App.state[colName].filter(x => x.id !== id);
-            App.render();
+            window.App.render();
         }
     }
 };
 
 window.formatCOP = (value) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value || 0);
-window.parseCOP = (valueStr) => Number(valueStr.replace(/[^0-9.-]+/g,""));
+
+// BUSCADOR EXACTO PARA RELACIÓN CLIENTE-VIAJE
+window.exactMatch = (str, target) => {
+    if(!str || !target) return false;
+    return str.split(',').map(x=>x.trim().toLowerCase()).includes(target.toLowerCase());
+};
 
 /**
  * ==========================================
- * 3. DATOS SEMILLA (BACKUP PARA MIGRACIÓN Y LOCAL)
+ * 3. DATOS SEMILLA (CON ROLES Y PINES)
  * ==========================================
  */
 const SEED_DATA = {
     cuentas: [
-        { id: 1, nombre: 'Banco Agrario Principal', tipo: 'banco', saldoInicial: 10000000, numero: '123-456-789' },
-        { id: 2, nombre: 'Caja Fuerte (Barco)', tipo: 'caja', saldoInicial: 5000000, numero: 'Efectivo' },
-        { id: 3, nombre: 'Caja Menor Operativa', tipo: 'caja_menor', saldoInicial: 1500000, numero: 'Efectivo' }
+        { id: 1, nombre: 'Banco Agrario Principal', tipo: 'banco', saldoInicial: 10000000, numero: '123-456-789' }
     ],
-    transacciones: [
-        { id: 1, cuentaId: 1, tipo: 'ingreso', monto: 10000000, fecha: '2025-10-01', concepto: 'Apertura Inicial Banco', modulo: 'Ajuste', referencia: null },
-        { id: 2, cuentaId: 2, tipo: 'ingreso', monto: 5000000, fecha: '2025-10-01', concepto: 'Apertura Inicial Caja Fuerte', modulo: 'Ajuste', referencia: null }
-    ],
+    transacciones: [],
     viajes: [
-        { id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', periodo: 'Octubre 2025', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, utilidadBruta: 37849000, cartera: 12411000, ingresoRecaudado: 54545000, observaciones: 'Madera bajada Satinga', clientesAsociados: 'Oscar, Pepe', productos: 'Madera Aserrada', pagoFlete: 54545000, pagoCargue: 2000000 },
-        { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', periodo: 'Noviembre 2025', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, utilidadBruta: 28100000, cartera: 11084000, ingresoRecaudado: 35356300, observaciones: 'Madera de exportación', clientesAsociados: 'Oscar', productos: 'Madera Fina', pagoFlete: 35356300, pagoCargue: 1500000 },
-        { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', periodo: 'Noviembre 2025', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, utilidadBruta: 46260000, cartera: 0, ingresoRecaudado: 73131000, observaciones: 'Flete completo pagado', clientesAsociados: 'Konny Hospital', productos: 'Equipos Médicos', pagoFlete: 73131000, pagoCargue: 3000000 },
-        { id: 4, fecha: '2025-12-02', viaje: 'Viaje #4', periodo: 'Diciembre 2025', ruta: 'B/tura - Charco', ingreso: 80023500, gastos: 22800000, utilidadBruta: 57223500, cartera: 32119500, ingresoRecaudado: 47904000, observaciones: 'Tubos, Grava, Varillas Tola', clientesAsociados: 'Alex, Oscar', productos: 'Material Construcción, Madera', pagoFlete: 47904000, pagoCargue: 4500000 },
-        { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', periodo: 'Diciembre 2025', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, utilidadBruta: 18820000, cartera: 0, ingresoRecaudado: 34820000, observaciones: 'Viaje Tumaco sin cartera', clientesAsociados: 'Modesto', productos: 'Víveres y Abarrotes', pagoFlete: 34820000, pagoCargue: 1200000 }
+        { id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', periodo: 'Octubre 2025', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, utilidadBruta: 37849000, cartera: 12411000, ingresoRecaudado: 54545000, observaciones: 'Madera bajada Satinga', clientesAsociados: 'Oscar, Pepe', productos: 'Madera Aserrada', pagoFlete: 54545000, pagoCargue: 2000000 }
     ],
     clientesDir: [
-        { id: 1, nombre: 'John Jairo Silva', tipo: 'Equipos e Insumos', segmento: 'Comerciante', nit: '111111111-1', telefono: '310 000 0000', ubicacion: 'Buenaventura' },
-        { id: 2, nombre: 'Oscar', tipo: 'Comerciante de Madera', segmento: 'Persona Común', nit: '222222222', telefono: '312 000 0000', ubicacion: 'Satinga' },
-        { id: 3, nombre: 'Alex', tipo: 'Materiales Construcción', segmento: 'Comerciante', nit: '333333333-3', telefono: '315 000 0000', ubicacion: 'La Tola' },
-        { id: 4, nombre: 'Konny Hospital', tipo: 'Institucional / Salud', segmento: 'Proyecto', nit: '900000000-1', telefono: '318 000 0000', ubicacion: 'El Charco' },
-        { id: 5, nombre: 'Modesto', tipo: 'Socio / Proveedor', segmento: 'Interno', nit: 'N/A', telefono: '320 000 0000', ubicacion: 'Tumaco' }
+        { id: 2, nombre: 'Oscar', tipo: 'Comerciante de Madera', segmento: 'Persona Común', nit: '222222222', telefono: '3120000000', ubicacion: 'Satinga' }
     ],
-    socios: [
-        { id: 1, nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -81900472, utilidadCausada: 69689184 },
-        { id: 2, nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0, utilidadCausada: 67946954 },
-        { id: 3, nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0, utilidadCausada: 26133444 },
-        { id: 4, nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0, utilidadCausada: 3867751 },
-        { id: 5, nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0, utilidadCausada: 3379991 },
-        { id: 6, nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0, utilidadCausada: 2961849 }
-    ],
-    pagosNomina: [
-        { id: 1, fecha: '2025-10-30', viaje: 'Viaje #1', valor: 3200000, estado: 'Pagado', detalle: 'Toda la tripulación (5 días)', extra: 'Productos: Madera' }
+    socios: [],
+    pagosNomina: [],
+    usuarios: [
+        { id: 1, telefono: '3000000000', rol: 'admin', nombre: 'Admin Principal', pin: '1234' },
+        { id: 2, telefono: '3201112233', rol: 'editor', nombre: 'Capitán / Tripulante', pin: '' }
     ]
 };
 
@@ -166,25 +158,23 @@ const SEED_DATA = {
 const App = {
     state: {
         activeTab: 'dashboard', niifTab: 'estado-situacion', docTab: 'escaner',
-        tesoreriaFiltro: 'Todos', tesoreriaPeriodoFiltro: 'Todos', tesoreriaViajeFiltro: 'Todos',
-        sociedadFiltroMes: 'Todos', carteraViajeFiltro: 'Todos', viajesFiltroMes: 'Todos', viajesFiltroRuta: 'Todos', informePdfFiltro: 'Todos', dashboardChartFiltro: 'Todos',
-        isUploading: false, uploadSuccess: false, isFabOpen: false, isSyncingData: false,
+        uploadSuccess: false, isFabOpen: false, isSyncingData: false,
+        syncQueue: [], 
+        userSession: JSON.parse(localStorage.getItem('erp_user_session')) || null, 
 
         selectedViaje: null, selectedCliente: null, selectedSocio: null,
-        isAddViajeOpen: false, isAddClienteOpen: false, isAddNominaOpen: false, isAddSocioOpen: false, isTransferOpen: false, isAddCuentaOpen: false, isAddTransaccionOpen: false,
-        editingViajeId: null, editingClienteId: null, editingSocioId: null, editingCuentaId: null,
+        isAddViajeOpen: false, isAddClienteOpen: false, isAddNominaOpen: false, isAddSocioOpen: false, isTransferOpen: false, isAddCuentaOpen: false, isAddTransaccionOpen: false, isAddUsuarioOpen: false,
+        editingViajeId: null, editingClienteId: null, editingSocioId: null, editingCuentaId: null, editingUsuarioId: null,
 
         numpad: { isOpen: false, targetField: null, targetLabel: '', targetForm: 'viaje', value: '0' },
 
         formTemp: {
             viaje: { fecha: '', ruta: '', observaciones: '', productos: '', clientesAsociados: '', ingreso: 0, gastos: 0, cartera: 0, pagoFlete: 0, pagoCargue: 0, cuentaIngresoId: '', cuentaEgresoId: '' },
             cliente: { nombre: '', nit: '', segmento: 'Persona Común', tipo: 'General', telefono: '', ubicacion: '' },
-            nomina: { fecha: '', viaje: '', productosAsociados: '', clientesAsociados: '', cuentaId: '' },
-            nominaCrew: [],
             socio: { nombre: '', porcentaje: 0, inversion: 0, saldoMantenimiento: 0, cuentaId: '' },
-            transferencia: { vendedorId: '', compradorId: '', porcentaje: 0 },
             cuenta: { nombre: '', tipo: 'banco', saldoInicial: 0, numero: '' },
-            transaccion: { tipo: 'ingreso', monto: 0, fecha: new Date().toISOString().split('T')[0], concepto: '', cuentaId: '', cuentaDestinoId: '' }
+            transaccion: { tipo: 'ingreso', monto: 0, fecha: new Date().toISOString().split('T')[0], concepto: '', cuentaId: '', cuentaDestinoId: '' },
+            usuario: { telefono: '', rol: 'editor', nombre: '', pin: '' }
         },
 
         config: {
@@ -192,62 +182,107 @@ const App = {
             ui: { isDark: false, bgColor: '#f8fafc', textColor: '#1e293b', textSize: 'normal' }
         },
 
-        // Carga inicial del Backup. Si hay Firebase, estas variables se suscriben y refrescan en vivo.
         cuentas: JSON.parse(JSON.stringify(SEED_DATA.cuentas)), 
         transacciones: JSON.parse(JSON.stringify(SEED_DATA.transacciones)), 
         viajes: JSON.parse(JSON.stringify(SEED_DATA.viajes)), 
         clientesDir: JSON.parse(JSON.stringify(SEED_DATA.clientesDir)), 
         socios: JSON.parse(JSON.stringify(SEED_DATA.socios)), 
         pagosNomina: JSON.parse(JSON.stringify(SEED_DATA.pagosNomina)),
+        usuarios: JSON.parse(JSON.stringify(SEED_DATA.usuarios)),
         
-        nominaBase: [
-            { id: 1, cargo: 'Capitán', valorDia: 190000, diasDefault: 5 }, { id: 2, cargo: 'Marinero 1', valorDia: 80000, diasDefault: 5 },
-            { id: 3, cargo: 'Marinero 2', valorDia: 80000, diasDefault: 5 }, { id: 4, cargo: 'Marinero 3', valorDia: 80000, diasDefault: 5 },
-            { id: 5, cargo: 'Cocinero', valorDia: 80000, diasDefault: 5 }, { id: 6, cargo: 'Maquinista 1', valorDia: 120000, diasDefault: 5 },
-            { id: 7, cargo: 'Maquinista 2', valorDia: 100000, diasDefault: 5 }
-        ]
+        nominaBase: [{ id: 1, cargo: 'Capitán', valorDia: 190000, diasDefault: 5 }]
     },
 
     navItems: [
-        { id: 'dashboard', label: 'Inicio', icon: 'trending-up' },
-        { id: 'tesoreria', label: 'Cajas/Bancos', icon: 'wallet-cards' },
-        { id: 'viajes', label: 'Viajes', icon: 'ship' },
-        { id: 'finanzas', label: 'NIIF', icon: 'landmark' },
-        { id: 'cartera', label: 'Cartera', icon: 'wallet' },
-        { id: 'nomina', label: 'Nómina', icon: 'users' },
-        { id: 'sociedad', label: 'Sociedad', icon: 'anchor' },
-        { id: 'clientes', label: 'Clientes', icon: 'contact' },
-        { id: 'documentos', label: 'Archivos', icon: 'file-scan' },
-        { id: 'basedatos', label: 'BD Ingresos', icon: 'database' },
-        { id: 'config', label: 'Ajustes', icon: 'settings' }
+        { id: 'dashboard', label: 'Inicio', icon: 'trending-up', roles: ['admin', 'editor', 'cliente'] },
+        { id: 'viajes', label: 'Viajes', icon: 'ship', roles: ['admin', 'editor', 'cliente'] },
+        { id: 'cartera', label: 'Cartera', icon: 'wallet', roles: ['admin', 'editor', 'cliente'] },
+        { id: 'tesoreria', label: 'Cajas/Bancos', icon: 'wallet-cards', roles: ['admin'] },
+        { id: 'finanzas', label: 'NIIF', icon: 'landmark', roles: ['admin'] },
+        { id: 'nomina', label: 'Nómina', icon: 'users', roles: ['admin'] },
+        { id: 'sociedad', label: 'Sociedad', icon: 'anchor', roles: ['admin'] },
+        { id: 'clientes', label: 'Clientes', icon: 'contact', roles: ['admin', 'editor'] },
+        { id: 'documentos', label: 'Archivos', icon: 'file-scan', roles: ['admin', 'editor'] },
+        { id: 'config', label: 'Ajustes', icon: 'settings', roles: ['admin'] }
     ],
 
-    setTab: (tab) => { App.state.activeTab = tab; App.state.isFabOpen = false; App.render(); },
-    setNiifTab: (tab) => { App.state.niifTab = tab; App.render(); },
-    setDocTab: (tab) => { App.state.docTab = tab; App.render(); },
-    setFilterVal: (key, val) => { App.state[key] = val; App.render(); },
-    togglePdfConfig: (key) => { App.state.config.pdfIncludes[key] = !App.state.config.pdfIncludes[key]; App.render(); },
-    
-    // Función de Sincronización Manual (Optimizada para Push Local -> Cloud)
-    syncToCloud: async () => {
-        if (!window.isFirebaseReady || !currentUser) { alert("⚠️ Esperando conexión real con Firebase..."); return; }
-        App.state.isSyncingData = true; App.render();
-        try {
-            const colecciones = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina'];
-            for (let col of colecciones) {
-                for (let item of App.state[col]) {
-                    await window.dbHelper.save(col, item.id, item);
+    // MÉTODOS DE AUTENTICACIÓN
+    handleLogin: (e) => {
+        e.preventDefault();
+        const f = e.target; 
+        const phone = f.telefono.value.trim().replace(/\s+/g, '');
+        const inputPin = f.pin.value.trim();
+        
+        let user = App.state.usuarios.find(u => u.telefono === phone);
+        
+        if (!user) {
+            const cliente = App.state.clientesDir.find(c => c.telefono.replace(/\s+/g, '') === phone);
+            if (cliente) {
+                user = { id: `c-${cliente.id}`, telefono: phone, rol: 'cliente', nombre: cliente.nombre };
+            }
+        }
+
+        if (user) {
+            // VERIFICACIÓN DE PIN SOLO PARA ADMINISTRADOR
+            if (user.rol === 'admin') {
+                if (user.pin && user.pin !== inputPin) {
+                    alert("Acceso Denegado. El PIN de administrador es incorrecto.");
+                    return;
+                } else if (!user.pin && inputPin !== '1234' && inputPin !== '') {
+                    // Fallback de seguridad si el admin perdió su PIN en la BD
+                    alert("Acceso Denegado. PIN incorrecto.");
+                    return;
                 }
             }
-            alert("✅ ¡Sincronización Completada! La nube ha sido actualizada con tus datos locales actuales.");
-        } catch (e) {
-            console.error(e);
-            alert("❌ Error sincronizando los datos. Revisa la consola.");
+
+            App.state.userSession = user;
+            localStorage.setItem('erp_user_session', JSON.stringify(user));
+            App.state.activeTab = 'dashboard';
+            App.render();
+        } else {
+            alert("Acceso Denegado. Teléfono no registrado en la base de datos.");
         }
-        App.state.isSyncingData = false; App.render();
+    },
+    handleLogout: () => {
+        App.state.userSession = null;
+        localStorage.removeItem('erp_user_session');
+        App.render();
     },
 
-    setUIConfig: (key, val) => { App.state.config.ui[key] = val; App.applyTheme(); App.render(); },
+    canEdit: () => {
+        const r = App.state.userSession?.rol;
+        return r === 'admin' || r === 'editor';
+    },
+    isAdmin: () => App.state.userSession?.rol === 'admin',
+
+    getViajesSegunRol: () => {
+        const s = App.state;
+        if (s.userSession?.rol === 'cliente') {
+            return s.viajes.filter(v => window.exactMatch(v.clientesAsociados, s.userSession.nombre));
+        }
+        return s.viajes;
+    },
+
+    setTab: (tab) => { App.state.activeTab = tab; App.state.isFabOpen = false; App.render(); },
+    setFilterVal: (key, val) => { App.state[key] = val; App.render(); },
+    
+    autoSyncDaemon: async () => {
+        if (!window.isFirebaseReady || !currentUser || !navigator.onLine || App.state.syncQueue.length === 0) return;
+        App.state.isSyncingData = true; App.render();
+        const queueCopy = [...App.state.syncQueue];
+        App.state.syncQueue = []; 
+        for (let task of queueCopy) {
+            try { await setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', task.colName, task.id.toString()), task.data, { merge: true }); } 
+            catch(e) { if(!App.state.syncQueue.find(x => x.colName === task.colName && x.id === task.id)) App.state.syncQueue.push(task); }
+        }
+        App.state.lastSyncTime = new Date(); App.state.isSyncingData = false; App.render();
+    },
+    syncToCloud: async () => {
+        if (!window.isFirebaseReady || !currentUser) { alert("Modo Offline."); return; }
+        await App.autoSyncDaemon();
+        if (App.state.syncQueue.length === 0) alert("Guardado Exitoso.");
+    },
+
     applyTheme: () => {
         const ui = App.state.config.ui; const root = document.documentElement;
         if(ui.textSize === 'small') root.style.fontSize = '14px'; else if(ui.textSize === 'large') root.style.fontSize = '18px'; else root.style.fontSize = '16px';
@@ -259,15 +294,6 @@ const App = {
             styleTag.innerHTML = `body, main { background-color: ${ui.bgColor} !important; color: ${ui.textColor} !important; }`;
         }
     },
-    exportToExcel: () => {
-        const viajes = App.state.viajes; if(!viajes.length) { alert("No hay datos para exportar."); return; }
-        const headers = ['ID', 'Fecha', 'Viaje/Documento', 'Periodo', 'Ruta', 'Ingreso Bruto', 'Gastos Operativos', 'Utilidad Bruta', 'Cartera Acumulada', 'Ingreso Recaudado (Caja)', 'Clientes', 'Productos', 'Pago Flete', 'Pago Cargue', 'Observaciones'];
-        const rows = viajes.map(v => [ v.id, v.fecha, `"${v.viaje}"`, `"${v.periodo || ''}"`, `"${v.ruta}"`, v.ingreso, v.gastos, v.utilidadBruta, v.cartera, v.ingresoRecaudado, `"${v.clientesAsociados || ''}"`, `"${v.productos || ''}"`, v.pagoFlete || 0, v.pagoCargue || 0, `"${v.observaciones || ''}"` ]);
-        let csvContent = "\uFEFF" + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob);
-        const link = document.createElement("a"); link.setAttribute("href", url); link.setAttribute("download", `DonSebe_Backup_${new Date().toISOString().split('T')[0]}.csv`);
-        document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    },
     
     openNumpad: (targetField, label, formTarget = 'viaje') => { App.state.numpad.isOpen = true; App.state.numpad.targetField = targetField; App.state.numpad.targetLabel = label; App.state.numpad.targetForm = formTarget; App.state.numpad.value = App.state.formTemp[formTarget][targetField] ? App.state.formTemp[formTarget][targetField].toString() : '0'; App.render(); },
     handleNumpadClick: (key) => {
@@ -278,7 +304,6 @@ const App = {
     },
     closeNumpad: () => { App.state.numpad.isOpen = false; App.render(); },
 
-    // CORE TESORERÍA Y FINANZAS
     getSaldoCuenta: (cuentaId) => {
         const s = App.state; const cuenta = s.cuentas.find(c => c.id === cuentaId); if(!cuenta) return 0;
         let saldo = cuenta.saldoInicial || 0;
@@ -286,37 +311,6 @@ const App = {
         return saldo;
     },
     getSaldoTotalCuentas: () => App.state.cuentas.reduce((acc, c) => acc + App.getSaldoCuenta(c.id), 0),
-    
-    openAddCuenta: () => { App.state.editingCuentaId = null; App.state.formTemp.cuenta = { nombre: '', tipo: 'banco', saldoInicial: 0, numero: '' }; App.state.isAddCuentaOpen = true; App.render(); },
-    editCuenta: (id) => { const c = App.state.cuentas.find(x => x.id === id); if(!c) return; App.state.editingCuentaId = id; App.state.formTemp.cuenta = { ...c }; App.state.isAddCuentaOpen = true; App.render(); },
-    deleteCuenta: async (id, btnElement) => {
-        if(btnElement.innerText === 'Eliminar Cuenta') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
-        else { await window.dbHelper.remove('cuentas', id); App.closeModals(); }
-    },
-    submitCuenta: async (e) => {
-        e.preventDefault(); const f = e.target;
-        const data = { nombre: f.nombre.value, tipo: f.tipo.value, numero: f.numero.value, saldoInicial: App.state.formTemp.cuenta.saldoInicial };
-        const newId = App.state.editingCuentaId || Date.now();
-        await window.dbHelper.save('cuentas', newId, { id: newId, ...data });
-        App.closeModals();
-    },
-    
-    openAddTransaccion: () => { App.state.formTemp.transaccion = { tipo: 'ingreso', monto: 0, fecha: new Date().toISOString().split('T')[0], concepto: '', cuentaId: '', cuentaDestinoId: '' }; App.state.isAddTransaccionOpen = true; App.render(); },
-    submitTransaccionManual: async (e) => {
-        e.preventDefault(); const f = e.target; const t = App.state.formTemp.transaccion; const cuentaOrigen = parseInt(f.cuentaId.value);
-        if (t.monto <= 0 || !cuentaOrigen) { alert("Datos inválidos."); return; }
-
-        if (t.tipo === 'transferencia') {
-            const cuentaDest = parseInt(f.cuentaDestinoId.value); if(cuentaOrigen === cuentaDest || !cuentaDest) { alert("Cuentas deben ser distintas."); return; }
-            const idRet = Date.now();
-            await window.dbHelper.save('transacciones', idRet, { id: idRet, cuentaId: cuentaOrigen, tipo: 'egreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia a #${cuentaDest} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null });
-            await window.dbHelper.save('transacciones', idRet + 1, { id: idRet + 1, cuentaId: cuentaDest, tipo: 'ingreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia de #${cuentaOrigen} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null });
-        } else {
-            const newId = Date.now();
-            await window.dbHelper.save('transacciones', newId, { id: newId, cuentaId: cuentaOrigen, tipo: t.tipo, monto: t.monto, fecha: f.fecha.value, concepto: f.concepto.value, modulo: 'Tesoreria', referencia: null });
-        }
-        App.closeModals();
-    },
 
     openModalViaje: (id) => { App.state.selectedViaje = App.state.viajes.find(v => v.id === id); App.render(); },
     editViaje: (id) => { const v = App.state.viajes.find(v => v.id === id); if(!v) return; App.state.editingViajeId = id; App.state.formTemp.viaje = { ...v, cuentaIngresoId: '', cuentaEgresoId: '' }; App.state.selectedViaje = null; App.state.isAddViajeOpen = true; App.render(); },
@@ -329,16 +323,11 @@ const App = {
         const totalEgresos = formD.gastos + (formD.pagoFlete || 0) + (formD.pagoCargue || 0); const recaudoReal = formD.ingreso - formD.cartera;
         const ctaIngreso = parseInt(f.cuentaIngresoId?.value); const ctaEgreso = parseInt(f.cuentaEgresoId?.value);
 
-        if (!App.state.editingViajeId) { if ((recaudoReal > 0 && !ctaIngreso) || (totalEgresos > 0 && !ctaEgreso)) { alert("Debe seleccionar las cajas/bancos para el movimiento de dinero."); return; } }
+        if (!App.state.editingViajeId && App.isAdmin()) { if ((recaudoReal > 0 && !ctaIngreso) || (totalEgresos > 0 && !ctaEgreso)) { alert("Cajas requeridas."); return; } }
 
-        // Calculo Automático del Mes Seguro
-        let periodoCalc = 'Nuevo Periodo';
-        if (f.fecha.value) {
-            const dateObj = new Date(f.fecha.value + 'T12:00:00Z');
-            const mesStr = dateObj.toLocaleString('es-ES', { month: 'long', timeZone: 'UTC' });
-            const yearStr = dateObj.getUTCFullYear();
-            periodoCalc = `${mesStr.charAt(0).toUpperCase() + mesStr.slice(1)} ${yearStr}`;
-        }
+        const dateObj = new Date(f.fecha.value + 'T12:00:00Z');
+        const mesStr = dateObj.toLocaleString('es-ES', { month: 'long', timeZone: 'UTC' });
+        const periodoCalc = f.fecha.value ? `${mesStr.charAt(0).toUpperCase() + mesStr.slice(1)} ${dateObj.getUTCFullYear()}` : 'Nuevo Periodo';
 
         const viajeData = { fecha: f.fecha.value, ruta: f.ruta.value, ingreso: formD.ingreso, gastos: formD.gastos, cartera: formD.cartera, pagoFlete: formD.pagoFlete, pagoCargue: formD.pagoCargue, productos: f.productos.value, clientesAsociados: f.clientesAsociados.value, observaciones: f.observaciones.value, utilidadBruta: formD.ingreso - formD.gastos, ingresoRecaudado: recaudoReal };
         const newId = App.state.editingViajeId || Date.now();
@@ -346,379 +335,122 @@ const App = {
 
         await window.dbHelper.save('viajes', newId, fullData);
 
-        if (!App.state.editingViajeId) {
+        if (!App.state.editingViajeId && App.isAdmin()) {
             if (recaudoReal > 0) await window.dbHelper.save('transacciones', Date.now() + 1, { id: Date.now() + 1, cuentaId: ctaIngreso, tipo: 'ingreso', monto: recaudoReal, fecha: f.fecha.value, concepto: `Recaudo Fletes - ${fullData.viaje}`, modulo: 'Viajes', referencia: newId });
             if (totalEgresos > 0) await window.dbHelper.save('transacciones', Date.now() + 2, { id: Date.now() + 2, cuentaId: ctaEgreso, tipo: 'egreso', monto: totalEgresos, fecha: f.fecha.value, concepto: `Costos y Operación - ${fullData.viaje}`, modulo: 'Viajes', referencia: newId });
         }
         App.closeModals();
     },
 
-    openModalCliente: (clienteNombre) => { App.state.selectedCliente = App.state.clientesDir.find(c => c.nombre === clienteNombre); App.render(); },
-    editCliente: (id) => { const c = App.state.clientesDir.find(c => c.id === id); if(!c) return; App.state.editingClienteId = id; App.state.formTemp.cliente = { ...c }; App.state.selectedCliente = null; App.state.isAddClienteOpen = true; App.render(); },
-    deleteCliente: async (id, btnElement) => {
-        if(btnElement.innerText === 'Eliminar') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
-        else { await window.dbHelper.remove('clientesDir', id); App.closeModals(); }
-    },
-    submitCliente: async (e) => {
+    submitUsuario: async (e) => {
         e.preventDefault(); const f = e.target;
-        const clientData = { nombre: f.nombre.value, tipo: f.tipo.value, segmento: f.segmento.value, nit: f.nit.value || 'N/A', telefono: f.telefono.value, ubicacion: f.ubicacion.value };
-        const newId = App.state.editingClienteId || Date.now();
-        await window.dbHelper.save('clientesDir', newId, { id: newId, ...clientData });
+        const data = { telefono: f.telefono.value.trim(), rol: f.rol.value, nombre: f.nombre.value, pin: f.pin ? f.pin.value.trim() : '' };
+        const newId = App.state.editingUsuarioId || Date.now();
+        await window.dbHelper.save('usuarios', newId, { id: newId, ...data });
         App.closeModals();
     },
-
-    openAddNomina: () => { App.state.formTemp.nominaCrew = App.state.nominaBase.map(n => ({...n, activo: true, dias: n.diasDefault})); App.state.formTemp.nomina = { fecha: new Date().toISOString().split('T')[0], viaje: '', productosAsociados: '', clientesAsociados: '', cuentaId: '' }; App.state.isAddNominaOpen = true; App.render(); },
-    toggleNominaCrew: (id) => { const c = App.state.formTemp.nominaCrew.find(n => n.id === id); if(c) c.activo = !c.activo; App.render(); },
-    updateNominaDias: (id, dias) => { const c = App.state.formTemp.nominaCrew.find(n => n.id === id); if(c) c.dias = Number(dias); App.render(); },
-    submitNomina: async (e) => {
-        e.preventDefault(); const f = e.target; const ctaId = parseInt(f.cuentaId.value);
-        if(!ctaId) { alert("Seleccione la cuenta bancaria o caja para el pago."); return; }
-
-        const tripulacionActiva = App.state.formTemp.nominaCrew.filter(n => n.activo); const totalPagado = tripulacionActiva.reduce((acc, curr) => acc + (curr.valorDia * curr.dias), 0); const faltantes = App.state.formTemp.nominaCrew.filter(n => !n.activo).length;
-        let detalleText = faltantes === 0 ? `Tripulación completa (${tripulacionActiva[0].dias} días)` : `${tripulacionActiva.length} tripulantes. Faltaron: ${faltantes}`;
-        let extraInfo = `Prods: ${f.productosAsociados.value || 'N/A'} | Clientes: ${f.clientesAsociados.value || 'N/A'}`;
-
-        const newId = Date.now();
-        await window.dbHelper.save('pagosNomina', newId, { id: newId, fecha: f.fecha.value, viaje: f.viaje.value, valor: totalPagado, estado: 'Pagado', detalle: detalleText, extra: extraInfo });
-        await window.dbHelper.save('transacciones', newId + 1, { id: newId + 1, cuentaId: ctaId, tipo: 'egreso', monto: totalPagado, fecha: f.fecha.value, concepto: `Liquidación de Nómina - ${f.viaje.value}`, modulo: 'Nomina', referencia: newId });
-        App.closeModals();
+    deleteUsuario: async (id, btnElement) => {
+        if(btnElement.innerText === 'Eliminar') { btnElement.innerText = 'Confirmar'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
+        else { await window.dbHelper.remove('usuarios', id); App.closeModals(); }
     },
-
-    openModalSocio: (id) => { App.state.selectedSocio = App.state.socios.find(s => s.id === id); App.render(); },
-    editSocio: (id) => { const s = App.state.socios.find(x => x.id === id); if(!s) return; App.state.editingSocioId = id; App.state.formTemp.socio = { ...s, saldoMantenimiento: Math.abs(s.saldoMantenimiento), cuentaId: '' }; App.state.selectedSocio = null; App.state.isAddSocioOpen = true; App.render(); },
-    deleteSocio: async (id, btnElement) => {
-        if(btnElement.innerText === 'Eliminar Registro') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
-        else { await window.dbHelper.remove('socios', id); App.closeModals(); }
-    },
-    submitSocio: async (e) => {
-        e.preventDefault(); const f = e.target; const formD = App.state.formTemp.socio; const ctaId = parseInt(f.cuentaId?.value);
-        const newId = App.state.editingSocioId || Date.now();
-        
-        const socioData = { nombre: f.nombre.value, porcentaje: parseFloat(f.porcentaje.value), inversion: formD.inversion, saldoMantenimiento: f.tipoSaldo.value === 'deuda' ? -Math.abs(formD.saldoMantenimiento) : Math.abs(formD.saldoMantenimiento), utilidadCausada: App.state.editingSocioId ? App.state.socios.find(x => x.id === newId).utilidadCausada : 0 };
-        await window.dbHelper.save('socios', newId, { id: newId, ...socioData });
-        
-        if (!App.state.editingSocioId && formD.inversion > 0 && ctaId) {
-            await window.dbHelper.save('transacciones', Date.now() + 1, { id: Date.now() + 1, cuentaId: ctaId, tipo: 'ingreso', monto: formD.inversion, fecha: new Date().toISOString().split('T')[0], concepto: `Aporte Inversión Inicial - ${socioData.nombre}`, modulo: 'Socios', referencia: newId });
-        }
-        App.closeModals();
-    },
-    openTransferModal: () => { App.state.isTransferOpen = true; App.render(); },
-    submitTransferencia: async (e) => {
-        e.preventDefault(); const f = e.target; const vId = parseInt(f.vendedor.value); const cId = parseInt(f.comprador.value); const pctStr = f.porcentaje.value.replace(',', '.'); const pct = parseFloat(pctStr);
-        if(vId === cId) return; const s = App.state.socios; const vIdx = s.findIndex(x => x.id === vId); const cIdx = s.findIndex(x => x.id === cId);
-        if(vIdx === -1 || cIdx === -1 || pct <= 0 || pct > s[vIdx].porcentaje) return;
-
-        const fraction = pct / s[vIdx].porcentaje; const invTransfer = s[vIdx].inversion * fraction; const deudaTransfer = s[vIdx].saldoMantenimiento * fraction;
-        
-        await window.dbHelper.save('socios', vId, { ...s[vIdx], porcentaje: s[vIdx].porcentaje - pct, inversion: s[vIdx].inversion - invTransfer, saldoMantenimiento: s[vIdx].saldoMantenimiento - deudaTransfer });
-        await window.dbHelper.save('socios', cId, { ...s[cIdx], porcentaje: s[cIdx].porcentaje + pct, inversion: s[cIdx].inversion + invTransfer, saldoMantenimiento: s[cIdx].saldoMantenimiento + deudaTransfer });
-        App.closeModals();
+    editUsuario: (id) => {
+        const u = App.state.usuarios.find(x => x.id === id); if(!u) return;
+        App.state.editingUsuarioId = id;
+        App.state.formTemp.usuario = { ...u };
+        App.state.isAddUsuarioOpen = true;
+        App.render();
     },
 
     closeModals: () => { 
         App.state.selectedViaje = null; App.state.selectedCliente = null; App.state.selectedSocio = null;
         App.state.isAddViajeOpen = false; App.state.isAddClienteOpen = false; App.state.isAddNominaOpen = false;
-        App.state.isAddSocioOpen = false; App.state.isTransferOpen = false; App.state.isAddCuentaOpen = false; App.state.isAddTransaccionOpen = false;
+        App.state.isAddSocioOpen = false; App.state.isTransferOpen = false; App.state.isAddCuentaOpen = false; App.state.isAddTransaccionOpen = false; App.state.isAddUsuarioOpen = false;
         App.state.numpad.isOpen = false;
-        App.state.editingViajeId = null; App.state.editingClienteId = null; App.state.editingSocioId = null; App.state.editingCuentaId = null;
+        App.state.editingViajeId = null; App.state.editingClienteId = null; App.state.editingSocioId = null; App.state.editingCuentaId = null; App.state.editingUsuarioId = null;
         
         App.state.formTemp.viaje = { fecha: '', ruta: '', observaciones: '', productos: '', clientesAsociados: '', ingreso: 0, gastos: 0, cartera: 0, pagoFlete: 0, pagoCargue: 0, cuentaIngresoId: '', cuentaEgresoId: '' };
-        App.state.formTemp.cliente = { nombre: '', nit: '', segmento: 'Persona Común', tipo: 'General', telefono: '', ubicacion: '' };
-        App.state.formTemp.socio = { nombre: '', porcentaje: 0, inversion: 0, saldoMantenimiento: 0, cuentaId: '' };
-        App.state.formTemp.transferencia = { vendedorId: '', compradorId: '', porcentaje: 0 };
-        App.state.formTemp.cuenta = { nombre: '', tipo: 'banco', saldoInicial: 0, numero: '' };
-        App.state.formTemp.transaccion = { tipo: 'ingreso', monto: 0, fecha: new Date().toISOString().split('T')[0], concepto: '', cuentaId: '', cuentaDestinoId: '' };
+        App.state.formTemp.usuario = { telefono: '', rol: 'editor', nombre: '', pin: '' };
         App.render(); 
     },
 
-    // Generadores Dinámicos de Periodos Financieros Matemático (NIIF Y Gráficas 100% Dinámico)
-    getInformePeriodos: () => {
-        const s = App.state;
-        const periodosMap = {};
-        s.viajes.forEach(v => {
-            const per = v.periodo || 'General';
-            if (!periodosMap[per]) {
-                periodosMap[per] = { periodo: per, ingresoProy: 0, ingresoReal: 0, utilProy: 0, utilReal: 0, cartera: 0, gastos: 0 };
-            }
-            periodosMap[per].ingresoProy += Number(v.ingreso) || 0;
-            periodosMap[per].ingresoReal += Number(v.ingresoRecaudado) || 0;
-            periodosMap[per].gastos += Number(v.gastos) || 0;
-            periodosMap[per].utilProy += Number(v.utilidadBruta) || 0;
-            periodosMap[per].cartera += Number(v.cartera) || 0;
-            periodosMap[per].utilReal += (Number(v.ingresoRecaudado) || 0) - (Number(v.gastos) || 0);
-        });
-        return Object.values(periodosMap);
-    },
-
     getTotales: () => {
+        const viajes = App.getViajesSegunRol();
         const s = App.state;
-        const ingresoTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.ingreso || 0), 0);
-        const gastoTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.gastos || 0), 0);
-        const utilidadBruta = s.viajes.reduce((acc, curr) => acc + Number(curr.utilidadBruta || 0), 0);
-        const carteraTotal = s.viajes.reduce((acc, curr) => acc + Number(curr.cartera || 0), 0); 
+        const ingresoTotal = viajes.reduce((acc, curr) => acc + Number(curr.ingreso || 0), 0);
+        const gastoTotal = viajes.reduce((acc, curr) => acc + Number(curr.gastos || 0), 0);
+        const utilidadBruta = viajes.reduce((acc, curr) => acc + Number(curr.utilidadBruta || 0), 0);
+        const carteraTotal = viajes.reduce((acc, curr) => acc + Number(curr.cartera || 0), 0); 
         const utilidadNeta = ingresoTotal - gastoTotal; 
-        const ingresoRecaudado = s.viajes.reduce((acc, curr) => acc + Number(curr.ingresoRecaudado || 0), 0);
+        const ingresoRecaudado = viajes.reduce((acc, curr) => acc + Number(curr.ingresoRecaudado || 0), 0);
         const inversionTotal = s.socios.reduce((acc, curr) => acc + Number(curr.inversion || 0), 0);
         const deudaMantenimientoTotal = s.socios.filter(x => x.saldoMantenimiento < 0).reduce((acc, curr) => acc + Math.abs(curr.saldoMantenimiento || 0), 0);
         return { ingresoTotal, gastoTotal, utilidadBruta, carteraTotal, utilidadNeta, ingresoRecaudado, inversionTotal, deudaMantenimientoTotal };
     },
 
-    /**
-     * ==========================================
-     * MÓDULOS BASE (PREVENCIÓN DE CRASHES)
-     * ==========================================
-     */
-    renderDashboard: () => {
-        const t = App.getTotales();
-        return `
-        <div class="space-y-6 animate-fade-in print:hidden">
-            <h2 class="text-2xl sm:text-3xl font-black flex items-center text-slate-800 tracking-tight"><i data-lucide="anchor" class="mr-3 text-blue-600 w-8 h-8"></i> Panel de Control</h2>
-            
-            <!-- Indicadores Clave -->
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-                <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden"><div class="absolute -right-4 -top-4 opacity-5"><i data-lucide="trending-up" class="w-24 h-24"></i></div><p class="text-[10px] sm:text-xs uppercase font-bold text-slate-400 mb-1 relative z-10">Ingresos Brutos</p><p class="text-xl sm:text-2xl lg:text-3xl font-black text-blue-600 tracking-tight relative z-10">${formatCOP(t.ingresoTotal)}</p></div>
-                <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden"><div class="absolute -right-4 -top-4 opacity-5 text-red-500"><i data-lucide="trending-down" class="w-24 h-24"></i></div><p class="text-[10px] sm:text-xs uppercase font-bold text-slate-400 mb-1 relative z-10">Gastos y Costos</p><p class="text-xl sm:text-2xl lg:text-3xl font-black text-red-500 tracking-tight relative z-10">${formatCOP(t.gastoTotal)}</p></div>
-                <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden"><div class="absolute -right-4 -top-4 opacity-5 text-green-500"><i data-lucide="check-circle-2" class="w-24 h-24"></i></div><p class="text-[10px] sm:text-xs uppercase font-bold text-slate-400 mb-1 relative z-10">Utilidad Neta</p><p class="text-xl sm:text-2xl lg:text-3xl font-black text-green-600 tracking-tight relative z-10">${formatCOP(t.utilidadNeta)}</p></div>
-                <div class="bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow relative overflow-hidden"><div class="absolute -right-4 -top-4 opacity-5 text-orange-500"><i data-lucide="alert-circle" class="w-24 h-24"></i></div><p class="text-[10px] sm:text-xs uppercase font-bold text-slate-400 mb-1 relative z-10">Cartera Activa</p><p class="text-xl sm:text-2xl lg:text-3xl font-black text-orange-500 tracking-tight relative z-10">${formatCOP(t.carteraTotal)}</p></div>
-            </div>
-
-            <!-- Menú de Módulos Operativos (Grid) -->
-            <div class="pt-4">
-                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center"><i data-lucide="layout-grid" class="w-4 h-4 mr-2"></i> Acceso Rápido a Módulos</h3>
-                <div class="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-                    ${App.navItems.filter(item => item.id !== 'dashboard').map(item => `
-                        <button onclick="window.App.setTab('${item.id}')" class="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col items-center justify-center hover:bg-blue-50 hover:border-blue-300 hover:shadow-md transition-all shadow-sm group active:scale-95">
-                            <div class="bg-slate-50 group-hover:bg-blue-100 p-3 sm:p-4 rounded-2xl mb-3 transition-colors shadow-inner">
-                                <i data-lucide="${item.icon}" class="w-6 h-6 sm:w-7 sm:h-7 text-slate-600 group-hover:text-blue-600"></i>
-                            </div>
-                            <span class="text-[10px] sm:text-xs font-bold text-slate-700 group-hover:text-blue-800 text-center leading-tight w-full truncate">${item.label}</span>
-                        </button>
-                    `).join('')}
+    // VISTAS
+    renderLogin: () => `
+        <div class="flex items-center justify-center h-screen bg-slate-900 px-4">
+            <div class="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-sm animate-scale-in">
+                <div class="text-center mb-8">
+                    <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner"><i data-lucide="anchor" class="w-8 h-8"></i></div>
+                    <h1 class="text-2xl font-black text-slate-800">Don Sebe ERP</h1>
+                    <p class="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">Portal de Acceso Seguro</p>
                 </div>
-            </div>
-
-            <!-- Gráfica de Rendimiento -->
-            <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 h-80 relative mt-6">
-                <div class="absolute top-4 right-4 flex space-x-2 z-10">
-                    <select onchange="window.App.setFilterVal('dashboardChartFiltro', this.value)" class="text-xs border p-1 rounded outline-none bg-white font-bold text-slate-600 cursor-pointer shadow-sm">
-                        <option value="Todos" ${App.state.dashboardChartFiltro==='Todos'?'selected':''}>Histórico Completo</option>
-                        <option value="Ultimos2" ${App.state.dashboardChartFiltro==='Ultimos2'?'selected':''}>Últimos 2 Meses</option>
-                        <option value="Ultimo" ${App.state.dashboardChartFiltro==='Ultimo'?'selected':''}>Mes Actual</option>
-                    </select>
-                </div>
-                <canvas id="lineChart"></canvas>
-            </div>
-        </div>`;
-    },
-    
-    renderViajes: () => {
-        const s = App.state;
-        return `
-        <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="ship" class="mr-2 text-blue-600"></i> Bitácora de Viajes</h2>
-                <button onclick="window.App.state.isAddViajeOpen=true; window.App.state.editingViajeId=null; window.App.render()" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 shadow-sm flex items-center transition-colors"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Añadir Viaje</button>
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                <div class="w-full overflow-x-auto table-scroll">
-                    <table class="w-full text-left border-collapse min-w-[800px]">
-                        <thead class="bg-slate-50 border-b text-[10px] uppercase text-slate-500 font-bold"><tr><th class="p-4">Viaje / Periodo</th><th class="p-4">Ruta / Carga</th><th class="p-4 text-right">Ingreso Bruto</th><th class="p-4 text-right">Utilidad Neta</th><th class="p-4 text-center">Estado</th></tr></thead>
-                        <tbody>
-                            ${s.viajes.sort((a,b)=>b.id-a.id).map(v => `
-                            <tr onclick="window.App.openModalViaje(${v.id})" class="border-b hover:bg-slate-50 cursor-pointer transition-colors">
-                                <td class="p-4"><p class="font-black text-slate-800">${v.viaje}</p><p class="text-xs text-slate-500">${v.periodo} • ${v.fecha}</p></td>
-                                <td class="p-4"><p class="font-bold text-slate-700">${v.ruta}</p><p class="text-xs text-blue-600 truncate max-w-[200px]">${v.productos || 'General'}</p></td>
-                                <td class="p-4 text-right font-black text-slate-800">${formatCOP(v.ingreso)}</td>
-                                <td class="p-4 text-right font-black text-green-600">${formatCOP(v.utilidadBruta)}</td>
-                                <td class="p-4 text-center"><span class="px-2 py-1 rounded text-[10px] font-black uppercase ${v.cartera > 0 ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-green-100 text-green-700 border-green-200'} border">${v.cartera > 0 ? 'Con Deuda' : 'Pagado'}</span></td>
-                            </tr>`).join('')}
-                            ${s.viajes.length === 0 ? '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-medium">No hay viajes registrados.</td></tr>' : ''}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>`;
-    },
-    
-    renderCartera: () => {
-        const s = App.state;
-        const viajesConDeuda = s.viajes.filter(v => v.cartera > 0);
-        const totalCartera = viajesConDeuda.reduce((acc, v) => acc + Number(v.cartera), 0);
-        return `
-        <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="wallet" class="mr-2 text-orange-600"></i> Cuentas por Cobrar</h2>
-            </div>
-            <div class="bg-orange-50 border border-orange-200 p-5 rounded-2xl flex justify-between items-center shadow-sm">
-                <span class="text-orange-900 font-bold uppercase tracking-widest text-sm">Cartera Activa Total:</span>
-                <span class="text-orange-600 font-black text-3xl">${formatCOP(totalCartera)}</span>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                ${viajesConDeuda.map(v => `
-                <div onclick="window.App.openModalViaje(${v.id})" class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-md transition-shadow relative overflow-hidden">
-                    <div class="absolute top-0 left-0 w-1 h-full bg-orange-400"></div>
-                    <p class="font-black text-slate-800">${v.viaje}</p>
-                    <p class="text-xs text-slate-500 mb-3">${v.clientesAsociados || 'Cliente no especificado'} • ${v.fecha}</p>
-                    <div class="bg-slate-50 p-2 rounded flex justify-between items-center"><span class="text-[10px] uppercase font-bold text-slate-400">Deuda Restante</span><span class="font-black text-orange-600 text-lg">${formatCOP(v.cartera)}</span></div>
-                </div>`).join('')}
-                ${viajesConDeuda.length === 0 ? '<div class="col-span-full p-8 text-center text-slate-400 font-medium">No hay cartera activa o deudas pendientes.</div>' : ''}
-            </div>
-        </div>`;
-    },
-
-    renderDocumentos: () => `
-        <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="file-scan" class="mr-2 text-blue-600"></i> Archivos y Soportes</h2>
-            </div>
-            <div class="bg-blue-50 border border-blue-200 border-dashed rounded-2xl p-8 text-center">
-                <i data-lucide="upload-cloud" class="w-12 h-12 text-blue-400 mx-auto mb-3"></i>
-                <h3 class="font-bold text-blue-900 text-lg">Módulo de Digitalización</h3>
-                <p class="text-sm text-blue-700 mt-2 max-w-md mx-auto">Sube fotos de recibos, consignaciones o facturas. Las imágenes se asociarán a la base de datos local y se subirán a Firebase Storage cuando haya conexión Wi-Fi.</p>
-                <button class="mt-4 bg-blue-600 text-white px-5 py-2.5 rounded-xl font-bold hover:bg-blue-700 transition shadow-sm opacity-50 cursor-not-allowed">Habilitar Cámara / Escáner</button>
-                <p class="text-[10px] text-blue-500 mt-2 font-bold uppercase">(Requiere permisos de Storage)</p>
-            </div>
-        </div>`,
-
-    renderNomina: () => {
-        const s = App.state;
-        return `
-        <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="users" class="mr-2 text-blue-600"></i> Liquidación de Nómina</h2>
-                <button onclick="window.App.openAddNomina()" class="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-slate-800 shadow-sm flex items-center transition-colors"><i data-lucide="calculator" class="w-4 h-4 mr-2"></i> Nueva Liquidación</button>
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                <div class="w-full overflow-x-auto table-scroll">
-                    <table class="w-full text-left border-collapse min-w-[700px]">
-                        <thead class="bg-slate-50 border-b text-[10px] uppercase text-slate-500 font-bold"><tr><th class="p-4">Fecha / Viaje</th><th class="p-4">Detalle Tripulación</th><th class="p-4">Info Extra</th><th class="p-4 text-right">Total Pagado</th></tr></thead>
-                        <tbody>
-                            ${s.pagosNomina.sort((a,b)=>b.id-a.id).map(n => `
-                            <tr class="border-b hover:bg-slate-50 transition-colors">
-                                <td class="p-4"><p class="font-black text-slate-800">${n.viaje}</p><p class="text-xs text-slate-500">${n.fecha}</p></td>
-                                <td class="p-4"><p class="font-medium text-slate-700 text-sm">${n.detalle}</p></td>
-                                <td class="p-4 text-xs text-slate-500">${n.extra || 'N/A'}</td>
-                                <td class="p-4 text-right font-black text-slate-800">${formatCOP(n.valor)}</td>
-                            </tr>`).join('')}
-                            ${s.pagosNomina.length === 0 ? '<tr><td colspan="4" class="p-8 text-center text-slate-400 font-medium">No hay pagos de nómina registrados.</td></tr>' : ''}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>`;
-    },
-
-    renderClientes: () => {
-        const s = App.state;
-        return `
-        <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="contact" class="mr-2 text-blue-600"></i> Directorio de Clientes</h2>
-                <button onclick="window.App.state.isAddClienteOpen=true; window.App.state.editingClienteId=null; window.App.render()" class="bg-green-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-green-700 shadow-sm flex items-center transition-colors"><i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Cliente</button>
-            </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                ${s.clientesDir.map(c => `
-                <div onclick="window.App.openModalCliente('${c.nombre}')" class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 cursor-pointer hover:shadow-md transition-all group relative">
-                    <div class="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity text-blue-500"><i data-lucide="external-link" class="w-4 h-4"></i></div>
-                    <div class="flex items-center mb-3"><div class="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black text-xl mr-4">${c.nombre.charAt(0).toUpperCase()}</div><div><h3 class="font-black text-slate-800 text-lg leading-tight">${c.nombre}</h3><span class="text-[10px] bg-slate-100 px-2 py-0.5 rounded text-slate-500 font-bold uppercase">${c.segmento}</span></div></div>
-                    <div class="space-y-1 text-xs text-slate-600">
-                        <p class="flex items-center"><i data-lucide="map-pin" class="w-3 h-3 mr-2 text-slate-400"></i> ${c.ubicacion}</p>
-                        <p class="flex items-center"><i data-lucide="phone" class="w-3 h-3 mr-2 text-slate-400"></i> ${c.telefono}</p>
+                <form onsubmit="window.App.handleLogin(event)" class="space-y-4">
+                    <div class="space-y-1">
+                        <label class="text-xs font-bold text-slate-500 uppercase">Número de Teléfono</label>
+                        <div class="flex items-center bg-slate-50 border-2 border-slate-200 rounded-xl overflow-hidden focus-within:border-blue-500 transition-colors">
+                            <div class="px-3 border-r border-slate-200 text-slate-400 font-bold text-sm">+57</div>
+                            <input name="telefono" type="tel" required placeholder="310 000 0000" class="w-full p-3 text-sm bg-transparent outline-none font-bold text-slate-800"/>
+                        </div>
                     </div>
-                </div>`).join('')}
-            </div>
-        </div>`;
-    },
-
-    renderBaseDatos: () => {
-        const s = App.state;
-        return `
-        <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
-                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="database" class="mr-2 text-blue-600"></i> Matriz de Datos en Crudo</h2>
-                <button onclick="App.exportToExcel()" class="bg-green-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-green-700 shadow-sm flex items-center transition-colors"><i data-lucide="download" class="w-4 h-4 mr-2"></i> Excel (.csv)</button>
-            </div>
-            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-                <div class="w-full overflow-x-auto table-scroll max-h-[600px]">
-                    <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
-                        <thead class="bg-slate-800 text-white sticky top-0 z-10"><tr><th class="p-2 border-r border-slate-700">ID</th><th class="p-2 border-r border-slate-700">Viaje</th><th class="p-2 border-r border-slate-700">Fecha</th><th class="p-2 border-r border-slate-700">Ingreso</th><th class="p-2 border-r border-slate-700">Gasto</th><th class="p-2 border-r border-slate-700">Util. Bruta</th><th class="p-2 border-r border-slate-700">Recaudado</th><th class="p-2">Cartera</th></tr></thead>
-                        <tbody>
-                            ${s.viajes.map(v => `
-                            <tr class="border-b hover:bg-slate-50 transition-colors">
-                                <td class="p-2 border-r text-slate-400">#${v.id}</td>
-                                <td class="p-2 border-r font-bold">${v.viaje}</td>
-                                <td class="p-2 border-r text-slate-500">${v.fecha}</td>
-                                <td class="p-2 border-r font-medium">${formatCOP(v.ingreso)}</td>
-                                <td class="p-2 border-r font-medium text-red-500">${formatCOP(v.gastos)}</td>
-                                <td class="p-2 border-r font-bold text-green-600">${formatCOP(v.utilidadBruta)}</td>
-                                <td class="p-2 border-r font-medium">${formatCOP(v.ingresoRecaudado)}</td>
-                                <td class="p-2 font-bold ${v.cartera > 0 ? 'text-orange-500' : 'text-slate-400'}">${formatCOP(v.cartera)}</td>
-                            </tr>`).join('')}
-                        </tbody>
-                    </table>
+                    <div class="space-y-1 mt-4">
+                        <label class="text-[10px] font-bold text-slate-500 uppercase text-blue-600">PIN de Seguridad (Solo Administradores)</label>
+                        <div class="flex items-center bg-blue-50 border-2 border-blue-100 rounded-xl overflow-hidden focus-within:border-blue-500 transition-colors">
+                            <div class="px-3 border-r border-blue-100 text-blue-400"><i data-lucide="lock" class="w-4 h-4"></i></div>
+                            <input name="pin" type="password" inputmode="numeric" placeholder="••••" class="w-full p-3 text-sm bg-transparent outline-none font-black text-slate-800 tracking-widest"/>
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full bg-blue-600 text-white font-black py-4 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all mt-4">Ingresar al Sistema</button>
+                </form>
+                <div class="mt-6 text-center text-[10px] text-slate-400 leading-tight">
+                    <p>Ingresa tu número registrado para acceder al portal. Si eres tripulante o cliente, deja el PIN en blanco.</p>
                 </div>
             </div>
-        </div>`;
-    },
+        </div>
+    `,
 
     renderDashboard: () => {
         const t = App.getTotales();
-        const margenOperativo = t.ingresoTotal > 0 ? ((t.utilidadNeta / t.ingresoTotal) * 100).toFixed(1) : 0;
-        const eficienciaRecaudo = t.ingresoTotal > 0 ? ((t.ingresoRecaudado / t.ingresoTotal) * 100).toFixed(1) : 0;
-        const roi = t.inversionTotal > 0 ? ((t.utilidadNeta / t.inversionTotal) * 100).toFixed(2) : 0;
+        const esCliente = App.state.userSession.rol === 'cliente';
 
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
             <div>
-                <h2 class="text-xl md:text-2xl font-bold text-slate-800">Dashboard Operativo y Financiero</h2>
-                <p class="text-sm text-slate-500">M/N Greicy Jireth - KPIs consolidados en Tiempo Real</p>
+                <h2 class="text-xl md:text-2xl font-bold text-slate-800">Hola, ${App.state.userSession.nombre}</h2>
+                <p class="text-sm text-slate-500">${esCliente ? 'Estado de Cuenta y Viajes Relacionados' : 'Dashboard Operativo - KPIs'}</p>
             </div>
+            
+            ${esCliente ? `
+            <div class="bg-orange-50 border border-orange-200 p-6 rounded-2xl flex flex-col items-center justify-center shadow-sm">
+                <span class="text-orange-900 font-bold uppercase tracking-widest text-sm mb-2">Tu Deuda Activa (Cartera)</span>
+                <span class="text-orange-600 font-black text-4xl sm:text-5xl drop-shadow-sm">${formatCOP(t.carteraTotal)}</span>
+                <p class="text-xs text-orange-700 mt-4 text-center">Este valor corresponde a los fletes pendientes de pago de tus viajes activos.</p>
+            </div>
+            ` : `
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Ingresos Brutos</p><div class="p-1.5 bg-blue-50 rounded-lg text-blue-600"><i data-lucide="trending-up" class="w-4 h-4"></i></div></div><h3 class="text-lg sm:text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.ingresoTotal)}</h3></div>
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Costos</p><div class="p-1.5 bg-red-50 rounded-lg text-red-600"><i data-lucide="file-spreadsheet" class="w-4 h-4"></i></div></div><h3 class="text-lg sm:text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.gastoTotal)}</h3></div>
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Util. Bruta</p><div class="p-1.5 bg-green-50 rounded-lg text-green-600"><i data-lucide="line-chart" class="w-4 h-4"></i></div></div><h3 class="text-lg sm:text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.utilidadBruta)}</h3></div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Cartera</p><div class="p-1.5 bg-orange-50 rounded-lg text-orange-600"><i data-lucide="alert-circle" class="w-4 h-4"></i></div></div><h3 class="text-lg sm:text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.carteraTotal)}</h3></div>
+                <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow cursor-pointer"><div class="flex justify-between items-center mb-2"><p class="text-xs font-bold text-slate-500 uppercase">Cartera Activa</p><div class="p-1.5 bg-orange-50 rounded-lg text-orange-600"><i data-lucide="alert-circle" class="w-4 h-4"></i></div></div><h3 class="text-lg sm:text-xl lg:text-2xl font-black text-slate-800">${formatCOP(t.carteraTotal)}</h3></div>
             </div>
-            
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="lg:col-span-2 bg-white p-4 sm:p-5 rounded-2xl shadow-sm border border-slate-100 h-[300px] lg:h-[400px] flex flex-col">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="text-sm font-bold text-slate-800 flex items-center"><i data-lucide="bar-chart-2" class="mr-2 text-blue-600 w-4 h-4"></i> Tendencia Financiera (M)</h3>
-                        <select onchange="window.App.setFilterVal('dashboardChartFiltro', this.value)" class="text-[10px] sm:text-xs font-bold border border-slate-200 rounded-lg p-1 outline-none text-slate-600 bg-slate-50">
-                            <option value="Todos" ${App.state.dashboardChartFiltro === 'Todos' ? 'selected' : ''}>Todo el Histórico</option>
-                            <option value="Ultimos2" ${App.state.dashboardChartFiltro === 'Ultimos2' ? 'selected' : ''}>Últimos 2 Periodos</option>
-                            <option value="Ultimo" ${App.state.dashboardChartFiltro === 'Ultimo' ? 'selected' : ''}>Último Periodo</option>
-                        </select>
-                    </div>
-                    <div class="flex-1 min-h-0 relative"><canvas id="lineChart"></canvas></div>
-                </div>
-                
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 min-h-[300px] lg:h-[400px] flex flex-col">
-                    <h3 class="text-sm font-bold text-slate-800 mb-4 flex items-center"><i data-lucide="activity" class="mr-2 text-green-500 w-4 h-4"></i> Eficiencia y Rendimiento</h3>
-                    <div class="flex-1 flex flex-col justify-around gap-4 sm:gap-0">
-                        <div class="group">
-                            <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Margen Operativo</span><span class="text-sm font-black text-slate-800">${margenOperativo}%</span></div>
-                            <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1"><div class="bg-blue-500 h-2.5 rounded-full" style="width: ${Math.min(margenOperativo, 100)}%"></div></div>
-                            <p class="text-[10px] text-slate-400 opacity-80 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">Convierte ingreso en utilidad neta tras descontar gastos.</p>
-                        </div>
-                        <div class="group">
-                            <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Eficiencia Recaudo</span><span class="text-sm font-black text-slate-800">${eficienciaRecaudo}%</span></div>
-                            <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1"><div class="bg-green-500 h-2.5 rounded-full" style="width: ${Math.min(eficienciaRecaudo, 100)}%"></div></div>
-                            <p class="text-[10px] text-slate-400 opacity-80 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">Porcentaje del ingreso facturado ya ingresado en caja.</p>
-                        </div>
-                        <div class="group">
-                            <div class="flex justify-between items-end mb-1"><span class="text-xs font-bold text-slate-500 uppercase">Retorno (ROI)</span><span class="text-sm font-black text-slate-800">${roi}%</span></div>
-                            <div class="w-full bg-slate-100 rounded-full h-2.5 mb-1"><div class="bg-indigo-500 h-2.5 rounded-full" style="width: ${Math.min(roi, 100)}%"></div></div>
-                            <p class="text-[10px] text-slate-400 opacity-80 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">Relación entre utilidad generada y capital aportado.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            `}
 
+            ${!esCliente ? `
             <div class="mt-8 bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100">
-                <h3 class="text-lg font-bold text-slate-800 mb-5 flex items-center"><i data-lucide="layout-grid" class="mr-2 text-blue-600 w-5 h-5"></i> Módulos del Sistema</h3>
+                <h3 class="text-lg font-bold text-slate-800 mb-5 flex items-center"><i data-lucide="layout-grid" class="mr-2 text-blue-600 w-5 h-5"></i> Módulos Autorizados</h3>
                 <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
-                    ${App.navItems.filter(item => item.id !== 'dashboard').map(item => `
+                    ${App.navItems.filter(item => item.id !== 'dashboard' && item.roles.includes(App.state.userSession.rol)).map(item => `
                         <button onclick="window.App.setTab('${item.id}')" class="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-blue-50 hover:border-blue-200 hover:shadow-md transition-all group">
                             <div class="bg-white p-3 rounded-full mb-3 shadow-sm group-hover:text-blue-600 transition-colors">
                                 <i data-lucide="${item.icon}" class="w-6 h-6 text-slate-600 group-hover:text-blue-600 transition-colors"></i>
@@ -727,111 +459,35 @@ const App = {
                         </button>
                     `).join('')}
                 </div>
-            </div>
+            </div>` : ''}
         </div>`;
     },
 
-    /**
-     * ==========================================
-     * RENDERIZADORES DE VISTAS (COMPONENTES)
-     * ==========================================
-     */
-    renderTesoreria: () => {
+    renderViajes: () => {
         const s = App.state;
-        const totalDisponible = App.getSaldoTotalCuentas();
-        const totalBancos = s.cuentas.filter(c=>c.tipo==='banco').reduce((acc, c) => acc + App.getSaldoCuenta(c.id), 0);
-        const totalCajas = s.cuentas.filter(c=>c.tipo!=='banco').reduce((acc, c) => acc + App.getSaldoCuenta(c.id), 0);
-        
-        const txPeriodos = [...new Set(s.transacciones.map(t => t.fecha.substring(0, 7)))].sort().reverse();
-        const viajesConTxs = s.viajes.filter(v => s.transacciones.some(t => t.referencia === v.id));
-
-        let txsRender = s.transacciones;
-        if(s.tesoreriaFiltro !== 'Todos') txsRender = txsRender.filter(t => t.cuentaId == s.tesoreriaFiltro || t.concepto.includes(`#${s.tesoreriaFiltro}`));
-        if(s.tesoreriaPeriodoFiltro !== 'Todos') txsRender = txsRender.filter(t => t.fecha.startsWith(s.tesoreriaPeriodoFiltro));
-        if(s.tesoreriaViajeFiltro !== 'Todos') txsRender = txsRender.filter(t => t.referencia == s.tesoreriaViajeFiltro);
+        const viajes = App.getViajesSegunRol();
+        const esCliente = s.userSession.rol === 'cliente';
 
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
-                <div><h2 class="text-2xl font-bold">Cajas y Bancos</h2><p class="text-sm text-slate-500">Gestión de liquidez y tesorería central</p></div>
-                <div class="flex flex-wrap gap-2 w-full sm:w-auto">
-                    <button onclick="App.openAddTransaccion()" class="bg-indigo-100 text-indigo-700 px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-indigo-200 transition-colors shadow-sm flex items-center w-full sm:w-auto justify-center"><i data-lucide="arrow-right-left" class="w-4 h-4 mr-2"></i> Registrar Movimiento</button>
-                    <button onclick="App.openAddCuenta()" class="bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-bold hover:bg-blue-700 transition-colors shadow-sm flex items-center w-full sm:w-auto justify-center"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Nueva Cuenta</button>
-                </div>
+            <div class="flex justify-between items-center">
+                <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="ship" class="mr-2 text-blue-600"></i> ${esCliente ? 'Mis Viajes' : 'Bitácora de Viajes'}</h2>
+                ${App.canEdit() ? `<button onclick="window.App.state.isAddViajeOpen=true; window.App.state.editingViajeId=null; window.App.render()" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-bold hover:bg-blue-700 shadow-sm flex items-center transition-colors"><i data-lucide="plus" class="w-4 h-4 mr-2"></i> Añadir Viaje</button>` : ''}
             </div>
-
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div class="bg-slate-800 p-5 rounded-2xl shadow-sm text-white border border-slate-700 relative overflow-hidden"><div class="absolute -right-4 -bottom-4 opacity-10"><i data-lucide="landmark" class="w-24 h-24"></i></div><p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 relative z-10">Total Efectivo Disponible</p><p class="text-2xl sm:text-3xl font-black relative z-10">${formatCOP(totalDisponible)}</p></div>
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200"><p class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 flex items-center"><i data-lucide="building-2" class="w-4 h-4 mr-1 text-blue-500"></i> En Bancos</p><p class="text-xl sm:text-2xl font-black text-slate-800">${formatCOP(totalBancos)}</p></div>
-                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200"><p class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1 flex items-center"><i data-lucide="inbox" class="w-4 h-4 mr-1 text-green-500"></i> En Cajas Físicas</p><p class="text-xl sm:text-2xl font-black text-slate-800">${formatCOP(totalCajas)}</p></div>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                ${s.cuentas.map(c => {
-                    const saldo = App.getSaldoCuenta(c.id);
-                    const icon = c.tipo === 'banco' ? 'building' : (c.tipo === 'caja_menor' ? 'piggy-bank' : 'vault');
-                    const color = c.tipo === 'banco' ? 'blue' : (c.tipo === 'caja_menor' ? 'orange' : 'green');
-                    return `
-                    <div class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-shadow relative group">
-                        <div class="absolute top-4 right-4 flex space-x-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button onclick="App.editCuenta(${c.id})" class="bg-slate-100 p-1.5 rounded-lg text-slate-500 hover:bg-blue-100 hover:text-blue-600 transition-colors"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
-                        </div>
-                        <div class="flex justify-between items-start mb-4 pr-12">
-                            <div class="flex items-center space-x-3">
-                                <div class="bg-${color}-50 p-2.5 rounded-xl text-${color}-600"><i data-lucide="${icon}" class="w-5 h-5"></i></div>
-                                <div><h4 class="font-bold text-slate-800 leading-tight">${c.nombre}</h4><p class="text-[10px] text-slate-500 font-medium uppercase">${c.tipo.replace('_', ' ')} • ${c.numero || 'N/A'}</p></div>
-                            </div>
-                        </div>
-                        <div><p class="text-[10px] uppercase font-bold text-slate-400">Saldo Actual</p><p class="text-2xl font-black text-slate-800 tracking-tight">${formatCOP(saldo)}</p></div>
-                    </div>`;
-                }).join('')}
-            </div>
-
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden mt-6">
-                <div class="p-4 border-b bg-slate-50 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3">
-                    <h3 class="font-bold text-slate-800 flex items-center text-sm w-full lg:w-auto"><i data-lucide="list-collapse" class="w-4 h-4 mr-2 text-slate-500"></i> Historial de Movimientos</h3>
-                    
-                    <div class="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
-                        <div class="flex items-center bg-white border border-slate-300 rounded-lg px-2 shadow-sm w-full sm:w-auto">
-                            <i data-lucide="calendar" class="w-4 h-4 text-slate-400"></i>
-                            <select onchange="App.setFilterVal('tesoreriaPeriodoFiltro', this.value)" class="text-xs p-2 outline-none font-bold text-slate-600 bg-transparent w-full">
-                                <option value="Todos">Cualquier Periodo</option>
-                                ${txPeriodos.map(p => `<option value="${p}" ${s.tesoreriaPeriodoFiltro == p ? 'selected':''}>${p}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="flex items-center bg-white border border-slate-300 rounded-lg px-2 shadow-sm w-full sm:w-auto">
-                            <i data-lucide="anchor" class="w-4 h-4 text-slate-400"></i>
-                            <select onchange="App.setFilterVal('tesoreriaViajeFiltro', this.value)" class="text-xs p-2 outline-none font-bold text-slate-600 bg-transparent w-full">
-                                <option value="Todos">Cualquier Viaje</option>
-                                ${viajesConTxs.map(v => `<option value="${v.id}" ${s.tesoreriaViajeFiltro == v.id ? 'selected':''}>${v.viaje}</option>`).join('')}
-                            </select>
-                        </div>
-                        <div class="flex items-center bg-white border border-slate-300 rounded-lg px-2 shadow-sm w-full sm:w-auto">
-                            <i data-lucide="wallet" class="w-4 h-4 text-slate-400"></i>
-                            <select onchange="App.setFilterVal('tesoreriaFiltro', this.value)" class="text-xs p-2 outline-none font-bold text-slate-600 bg-transparent w-full">
-                                <option value="Todos">Todas las cuentas</option>
-                                ${s.cuentas.map(c => `<option value="${c.id}" ${s.tesoreriaFiltro == c.id ? 'selected':''}>${c.nombre}</option>`).join('')}
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                <div class="w-full overflow-x-auto table-scroll max-h-[500px] overflow-y-auto">
-                    <table class="w-full text-left border-collapse min-w-[700px]">
-                        <thead class="sticky top-0 z-10"><tr class="bg-slate-100 text-slate-600 text-[10px] uppercase font-bold border-b shadow-sm"><th class="p-3">Fecha</th><th class="p-3">Cuenta Afectada</th><th class="p-3">Concepto / Módulo</th><th class="p-3 text-center">Tipo</th><th class="p-3 text-right">Valor</th></tr></thead>
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+                <div class="w-full overflow-x-auto table-scroll">
+                    <table class="w-full text-left border-collapse min-w-[800px]">
+                        <thead class="bg-slate-50 border-b text-[10px] uppercase text-slate-500 font-bold"><tr><th class="p-4">Viaje / Periodo</th><th class="p-4">Ruta / Carga</th><th class="p-4 text-right">Flete Total</th>${!esCliente ? '<th class="p-4 text-right">Utilidad Neta</th>' : ''}<th class="p-4 text-center">Estado de Pago</th></tr></thead>
                         <tbody>
-                            ${txsRender.length === 0 ? '<tr><td colspan="5" class="p-8 text-center text-slate-400 font-medium">No hay transacciones registradas con estos filtros.</td></tr>' : 
-                            [...txsRender].sort((a,b)=> b.id - a.id).map(t => {
-                                const c = s.cuentas.find(x => x.id === t.cuentaId);
-                                const isIngreso = t.tipo === 'ingreso';
-                                return `
-                                <tr class="border-b hover:bg-slate-50 transition-colors text-sm">
-                                    <td class="p-3 text-xs text-slate-500 font-medium whitespace-nowrap">${t.fecha}</td>
-                                    <td class="p-3 font-bold text-slate-700 whitespace-nowrap">${c ? c.nombre : 'Eliminada'}</td>
-                                    <td class="p-3"><p class="font-medium text-slate-800">${t.concepto}</p><p class="text-[10px] text-slate-400 font-bold uppercase mt-0.5">${t.modulo}</p></td>
-                                    <td class="p-3 text-center"><span class="px-2 py-1 rounded bg-${isIngreso?'green':'red'}-50 text-${isIngreso?'green':'red'}-700 text-[10px] font-black uppercase border border-${isIngreso?'green':'red'}-200">${isIngreso ? 'Ingreso' : 'Egreso'}</span></td>
-                                    <td class="p-3 text-right font-black ${isIngreso?'text-green-600':'text-red-500'} whitespace-nowrap">${isIngreso ? '+' : '-'} ${formatCOP(t.monto)}</td>
-                                </tr>`;
-                            }).join('')}
+                            ${viajes.sort((a,b)=>b.id-a.id).map(v => `
+                            <tr onclick="window.App.openModalViaje(${v.id})" class="border-b hover:bg-slate-50 cursor-pointer transition-colors">
+                                <td class="p-4"><p class="font-black text-slate-800">${v.viaje}</p><p class="text-xs text-slate-500">${v.periodo} • ${v.fecha}</p></td>
+                                <td class="p-4"><p class="font-bold text-slate-700">${v.ruta}</p><p class="text-xs text-blue-600 truncate max-w-[200px]">${v.productos || 'General'}</p></td>
+                                <td class="p-4 text-right font-black text-slate-800">${formatCOP(v.ingreso)}</td>
+                                ${!esCliente ? `<td class="p-4 text-right font-black text-green-600">${formatCOP(v.utilidadBruta)}</td>` : ''}
+                                <td class="p-4 text-center"><span class="px-2 py-1 rounded text-[10px] font-black uppercase ${v.cartera > 0 ? 'bg-orange-100 text-orange-700 border-orange-200' : 'bg-green-100 text-green-700 border-green-200'} border">${v.cartera > 0 ? 'Con Deuda' : 'Pagado'}</span></td>
+                            </tr>`).join('')}
+                            ${viajes.length === 0 ? `<tr><td colspan="${esCliente?4:5}" class="p-8 text-center text-slate-400 font-medium">No hay viajes registrados.</td></tr>` : ''}
                         </tbody>
                     </table>
                 </div>
@@ -840,555 +496,92 @@ const App = {
     },
 
     renderConfig: () => {
-        const c = App.state.config.pdfIncludes;
         const ui = App.state.config.ui;
+        const s = App.state;
+
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
-                <div><h2 class="text-2xl font-bold flex items-center"><i data-lucide="settings" class="mr-2 text-blue-600 w-6 h-6"></i> Configuración del Sistema</h2><p class="text-sm text-slate-500">Ajustes de interfaz y preferencias de exportación</p></div>
+            <div class="flex justify-between items-center">
+                <div><h2 class="text-2xl font-bold flex items-center"><i data-lucide="settings" class="mr-2 text-blue-600 w-6 h-6"></i> Configuración Global</h2><p class="text-sm text-slate-500">Sistema operativo y accesos</p></div>
             </div>
 
-            <div class="bg-blue-50 rounded-2xl shadow-sm border border-blue-200 p-6 max-w-2xl relative overflow-hidden">
-                <div class="absolute top-0 right-0 p-4"><i data-lucide="cloud" class="w-20 h-20 text-blue-200 opacity-50"></i></div>
-                <h3 class="font-bold text-lg text-blue-900 mb-2 border-b border-blue-200 pb-3 flex items-center relative z-10"><i data-lucide="cloud-cog" class="w-5 h-5 mr-2 text-blue-600"></i> Infraestructura en la Nube (Firebase)</h3>
-                <p class="text-xs text-blue-800 mb-5 relative z-10">Tus credenciales están inyectadas. Si tu base de datos de Firebase está vacía, pulsa este botón para migrar de golpe toda la historia local a la nube y trabajar siempre sincronizado.</p>
-                <div class="flex items-center space-x-3 mb-4 relative z-10"><div class="w-3 h-3 rounded-full ${window.isFirebaseReady ? 'bg-green-500 animate-pulse' : 'bg-red-500'}"></div><span class="text-sm font-bold text-blue-900">${window.isFirebaseReady ? 'Conexión Segura con Firebase Activa' : 'Modo Seguro Offline Activo (Revisa Claves)'}</span></div>
-                <button onclick="App.syncToCloud()" ${App.state.isSyncingData ? 'disabled':''} class="relative z-10 w-full sm:w-auto bg-blue-600 text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center hover:bg-blue-700 transition shadow-sm disabled:opacity-50">
-                    <i data-lucide="${App.state.isSyncingData ? 'loader' : 'cloud-upload'}" class="w-5 h-5 mr-2 ${App.state.isSyncingData ? 'animate-spin' : ''}"></i> Sincronizar Datos a la Nube
-                </button>
-            </div>
-            
+            <!-- MÓDULO: GESTIÓN DE USUARIOS (RBAC + PIN) -->
+            ${App.isAdmin() ? `
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
-                <h3 class="font-bold text-lg text-slate-800 mb-4 border-b pb-3 flex items-center"><i data-lucide="palette" class="w-5 h-5 mr-2 text-slate-400"></i> Personalización de Interfaz</h3>
+                <div class="flex justify-between items-center mb-4 border-b pb-3">
+                    <h3 class="font-bold text-lg text-slate-800 flex items-center"><i data-lucide="users-2" class="w-5 h-5 mr-2 text-slate-400"></i> Control de Acceso (Usuarios)</h3>
+                    <button onclick="window.App.state.isAddUsuarioOpen=true; window.App.state.editingUsuarioId=null; window.App.render()" class="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-slate-800 transition"><i data-lucide="plus" class="w-4 h-4 inline mr-1"></i> Autorizar</button>
+                </div>
+                <p class="text-xs text-slate-500 mb-4">Números autorizados. Los perfiles Administradores requieren un PIN de 4 dígitos (Por defecto: 1234).</p>
+                <div class="space-y-2">
+                    ${s.usuarios.map(u => `
+                    <div class="flex justify-between items-center p-3 border border-slate-100 rounded-xl hover:bg-slate-50 transition-colors">
+                        <div>
+                            <p class="font-bold text-sm text-slate-700">${u.nombre}</p>
+                            <p class="text-xs text-slate-500 flex items-center mt-0.5"><i data-lucide="phone" class="w-3 h-3 mr-1"></i> +57 ${u.telefono}</p>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span class="text-[10px] font-black uppercase px-2 py-1 rounded bg-${u.rol==='admin'?'red':'blue'}-100 text-${u.rol==='admin'?'red':'blue'}-700 flex items-center">${u.rol==='admin' ? '<i data-lucide="lock" class="w-3 h-3 mr-1"></i>' : ''}${u.rol}</span>
+                            <button onclick="window.App.editUsuario(${u.id})" class="text-slate-400 hover:text-blue-500 bg-white shadow-sm border p-1.5 rounded-lg"><i data-lucide="edit-2" class="w-4 h-4"></i></button>
+                            <button onclick="window.App.deleteUsuario(${u.id}, this)" class="text-slate-400 hover:text-red-500 bg-white shadow-sm border p-1.5 rounded-lg"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        </div>
+                    </div>`).join('')}
+                </div>
+            </div>` : ''}
+
+            <!-- UI Personalización -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
+                <h3 class="font-bold text-lg text-slate-800 mb-4 border-b pb-3 flex items-center"><i data-lucide="palette" class="w-5 h-5 mr-2 text-slate-400"></i> Personalización</h3>
                 <div class="space-y-4">
-                    <div class="flex items-center justify-between p-3 border rounded-xl hover:bg-slate-50 transition-colors">
-                        <div><p class="text-sm font-bold text-slate-700">Modo Oscuro Automático</p><p class="text-[10px] text-slate-400">Invierte paleta de colores para lectura nocturna.</p></div>
+                    <div class="flex items-center justify-between p-3 border rounded-xl">
+                        <div><p class="text-sm font-bold text-slate-700">Modo Oscuro</p></div>
                         <label class="relative inline-flex items-center cursor-pointer">
                           <input type="checkbox" ${ui.isDark ? 'checked':''} onchange="App.setUIConfig('isDark', this.checked)" class="sr-only peer">
                           <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                         </label>
                     </div>
-                    <div class="grid grid-cols-2 gap-4">
-                        <div class="space-y-1">
-                            <label class="text-xs font-bold text-slate-500 uppercase">Fondo Global</label>
-                            <input type="color" value="${ui.bgColor}" onchange="App.setUIConfig('bgColor', this.value)" ${ui.isDark ? 'disabled opacity-50':''} class="w-full h-10 rounded cursor-pointer border border-slate-200 p-1">
-                        </div>
-                        <div class="space-y-1">
-                            <label class="text-xs font-bold text-slate-500 uppercase">Texto Base</label>
-                            <input type="color" value="${ui.textColor}" onchange="App.setUIConfig('textColor', this.value)" ${ui.isDark ? 'disabled opacity-50':''} class="w-full h-10 rounded cursor-pointer border border-slate-200 p-1">
-                        </div>
-                    </div>
-                    <div class="space-y-1 mt-2">
-                        <label class="text-xs font-bold text-slate-500 uppercase">Tamaño de Texto</label>
-                        <select onchange="App.setUIConfig('textSize', this.value)" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none font-medium bg-white">
-                            <option value="small" ${ui.textSize==='small'?'selected':''}>Pequeño (14px)</option>
-                            <option value="normal" ${ui.textSize==='normal'?'selected':''}>Normal (16px)</option>
-                            <option value="large" ${ui.textSize==='large'?'selected':''}>Grande (18px)</option>
-                        </select>
-                    </div>
                 </div>
-            </div>
-
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
-                <h3 class="font-bold text-lg text-slate-800 mb-4 border-b pb-3 flex items-center"><i data-lucide="hard-drive" class="w-5 h-5 mr-2 text-slate-400"></i> Copias de Seguridad Locales</h3>
-                <p class="text-xs text-slate-500 mb-5">Exporta el registro tabular de ingresos y fletes en formato CSV compatible con Microsoft Excel y Google Sheets. Útil para contabilidad externa.</p>
-                <button onclick="App.exportToExcel()" class="w-full sm:w-auto bg-green-600 text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-700 transition shadow-sm">
-                    <i data-lucide="file-spreadsheet" class="w-5 h-5 mr-2"></i> Exportar BD a Excel (.csv)
-                </button>
-            </div>
-
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
-                <h3 class="font-bold text-lg text-slate-800 mb-2 border-b pb-3 flex items-center"><i data-lucide="file-text" class="w-5 h-5 mr-2 text-slate-400"></i> Opciones de Informe PDF (NIIF)</h3>
-                <p class="text-xs text-slate-500 mb-5">Activa o desactiva los submódulos que deseas anexar al final del "Informe Consolidado" al momento de presionar Exportar PDF. Esto te permite generar un documento más corto si solo requieres los datos operativos.</p>
-                
-                <div class="space-y-4">
-                    <label class="flex items-center space-x-3 cursor-pointer p-3 border rounded-xl hover:bg-slate-50 transition-colors">
-                        <input type="checkbox" ${c.balance ? 'checked':''} onchange="App.togglePdfConfig('balance')" class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
-                        <div><p class="text-sm font-bold text-slate-700">Estado de Situación Financiera (Balance)</p><p class="text-[10px] text-slate-400">Activos, pasivos y patrimonio detallado.</p></div>
-                    </label>
-                    <label class="flex items-center space-x-3 cursor-pointer p-3 border rounded-xl hover:bg-slate-50 transition-colors">
-                        <input type="checkbox" ${c.resultados ? 'checked':''} onchange="App.togglePdfConfig('resultados')" class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
-                        <div><p class="text-sm font-bold text-slate-700">Estado de Resultados (P&G)</p><p class="text-[10px] text-slate-400">Desglose de ingresos, costos y utilidad neta.</p></div>
-                    </label>
-                    <label class="flex items-center space-x-3 cursor-pointer p-3 border rounded-xl hover:bg-slate-50 transition-colors">
-                        <input type="checkbox" ${c.flujo ? 'checked':''} onchange="App.togglePdfConfig('flujo')" class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
-                        <div><p class="text-sm font-bold text-slate-700">Estado de Flujo de Efectivo</p><p class="text-[10px] text-slate-400">Movimiento directo de caja e inversiones.</p></div>
-                    </label>
-                    <label class="flex items-center space-x-3 cursor-pointer p-3 border rounded-xl hover:bg-slate-50 transition-colors">
-                        <input type="checkbox" ${c.patrimonio ? 'checked':''} onchange="App.togglePdfConfig('patrimonio')" class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
-                        <div><p class="text-sm font-bold text-slate-700">Estado de Cambios en el Patrimonio</p><p class="text-[10px] text-slate-400">Evolución de aportes de socios y utilidades retenidas.</p></div>
-                    </label>
-                    <label class="flex items-center space-x-3 cursor-pointer p-3 border rounded-xl hover:bg-slate-50 transition-colors">
-                        <input type="checkbox" ${c.socios ? 'checked':''} onchange="App.togglePdfConfig('socios')" class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
-                        <div><p class="text-sm font-bold text-slate-700">Rendimiento Societario (KPIs)</p><p class="text-[10px] text-slate-400">Tabla de inversores, porcentajes, descuentos y liquidez.</p></div>
-                    </label>
-                </div>
-            </div>
-        </div>`;
-    },
-
-    renderNIIF: () => {
-        const t = App.getTotales(); const s = App.state;
-        let content = '';
-        
-        const todosLosPeriodos = App.getInformePeriodos();
-        let periodosInfo = todosLosPeriodos;
-        if(s.informePdfFiltro !== 'Todos') {
-            periodosInfo = todosLosPeriodos.filter(p => p.periodo === s.informePdfFiltro);
-        }
-        
-        const totIngProy = periodosInfo.reduce((a,c)=>a+c.ingresoProy,0);
-        const totIngReal = periodosInfo.reduce((a,c)=>a+c.ingresoReal,0);
-        const totUtilProy = periodosInfo.reduce((a,c)=>a+c.utilProy,0);
-        const totUtilReal = periodosInfo.reduce((a,c)=>a+c.utilReal,0);
-        const totCartera = periodosInfo.reduce((a,c)=>a+c.cartera,0);
-
-        const contentBalance = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Situación Financiera (Balance)</h3></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">El presente Estado de Situación Financiera resume y clasifica la posición económica real de la empresa M/N Greicy Jireth al cierre del periodo seleccionado. En él se confrontan los activos corrientes (liquidez en caja y deudas por cobrar a clientes) frente al pasivo a corto plazo (cuentas por pagar por mantenimientos). Finalmente, se consolida la posición frente a los aportes de capital del patrimonio neto para demostrar la solidez y el soporte financiero de la operación marítima.</p>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
-                <div><h4 class="font-black mb-3 bg-slate-100 border border-slate-200 p-2 sm:p-3 rounded-lg text-slate-800 text-xs sm:text-sm">ACTIVOS</h4>
-                    <div class="pl-2"><span class="text-xs font-bold text-slate-400">Activo Corriente</span>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Caja y Bancos (Efectivo)</span><span class="font-medium">${formatCOP(App.getSaldoTotalCuentas())}</span></div>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Cuentas por Cobrar (Clientes)</span><span class="font-medium">${formatCOP(t.carteraTotal)}</span></div></div>
-                    <div class="pl-2 mt-4"><span class="text-xs font-bold text-slate-400">Activo No Corriente</span>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Propiedad, Planta y Equipo (Barco)</span><span class="font-medium">${formatCOP(t.inversionTotal)}</span></div></div>
-                    <div class="flex justify-between font-black text-base sm:text-lg pt-3 mt-2 border-t-2 border-slate-800"><span>TOTAL ACTIVOS</span><span>${formatCOP(t.inversionTotal + App.getSaldoTotalCuentas() + t.carteraTotal)}</span></div>
-                </div>
-                <div><h4 class="font-black mb-3 bg-slate-100 border border-slate-200 p-2 sm:p-3 rounded-lg text-slate-800 text-xs sm:text-sm">PASIVO Y PATRIMONIO</h4>
-                    <div class="pl-2"><span class="text-xs font-bold text-slate-400">Pasivos</span>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Cuentas por Pagar (Mantenimiento)</span><span class="font-medium">${formatCOP(t.deudaMantenimientoTotal)}</span></div></div>
-                    <div class="pl-2 mt-4"><span class="text-xs font-bold text-slate-400">Patrimonio Neto</span>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Capital Social Suscrito</span><span class="font-medium">${formatCOP(t.inversionTotal)}</span></div>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Utilidades del Ejercicio</span><span class="font-medium text-green-600">${formatCOP(t.utilidadNeta - t.deudaMantenimientoTotal)}</span></div></div>
-                    <div class="flex justify-between font-black text-base sm:text-lg text-blue-700 pt-3 mt-2 border-t-2 border-slate-800"><span>TOTAL PASIVO + PAT.</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div>
-                </div>
-            </div>`;
-
-        const contentResultados = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Resultados Integrales (P&G)</h3></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">El Estado de Resultados (Pérdidas y Ganancias) evidencia detalladamente la dinámica del negocio a nivel operativo. La siguiente estructura confronta los ingresos directos obtenidos por la facturación de fletes y cargues, contra la totalidad de las erogaciones (gastos de combustible, nómina operativa de tripulación y mantenimiento regular). Este cruce permite auditar de forma cristalina la eficiencia administrativa para llegar a la Utilidad Neta real que será sometida a repartición.</p>
-            <div class="space-y-3 sm:space-y-4 text-xs sm:text-sm max-w-3xl mx-auto border-2 border-slate-100 p-6 rounded-2xl bg-white shadow-sm print:border-none print:shadow-none print:p-0">
-                <div class="flex justify-between items-center font-bold bg-slate-50 border border-slate-200 p-2 sm:p-3 rounded-lg"><span class="text-sm sm:text-base text-slate-800">Ingresos de Actividades Ordinarias (Fletes)</span><span class="text-base sm:text-lg">${formatCOP(t.ingresoTotal)}</span></div>
-                <div class="flex justify-between items-center px-2 sm:px-3 py-1"><span>(-) Costos Directos de Operación (Combustible, Insumos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.7)}</span></div>
-                <div class="flex justify-between items-center px-2 sm:px-3 py-1 border-b border-slate-200 pb-2 sm:pb-3"><span>(-) Gastos de Personal (Nómina, Viáticos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.3)}</span></div>
-                <div class="flex justify-between items-center px-2 sm:px-3 py-2 font-bold bg-green-50/50 rounded-lg"><span class="text-slate-800">Utilidad Bruta Operacional</span><span class="text-green-700">${formatCOP(t.utilidadBruta)}</span></div>
-                <div class="flex justify-between items-center px-2 sm:px-3 py-1 mt-2"><span>(-) Depreciación y Amortización (Estimado NIIF)</span><span class="text-red-500 font-medium">-${formatCOP(0)}</span></div>
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center font-black text-xl sm:text-2xl text-green-600 pt-4 sm:pt-6 mt-3 sm:mt-4 border-t-2 border-slate-800"><span class="uppercase tracking-tight text-sm sm:text-xl">UTILIDAD NETA DEL PERIODO</span><span class="mt-1 sm:mt-0">${formatCOP(t.utilidadNeta)}</span></div>
-            </div>`;
-
-        const contentFlujo = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Flujo de Efectivo</h3><p class="text-xs text-slate-500">Método Directo de Caja</p></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">Analizando bajo el modelo directo, este Estado de Flujo de Efectivo purga cualquier efecto de cuentas por cobrar (cartera) y se concentra exclusivamente en las entradas y salidas de dinero palpable en la caja y bancos. Se divide metodológicamente en "Actividades de Operación" (giro de negocio normal) y "Financiación/Inversión", brindando la fotografía real de la liquidez disponible para soportar la operatividad en el próximo periodo.</p>
-            <div class="max-w-2xl mx-auto space-y-4">
-                <div class="border rounded-xl p-4 bg-white shadow-sm print:border-slate-300 print:shadow-none print:bg-transparent">
-                    <h4 class="font-black text-blue-800 border-b pb-2 mb-2 text-sm print:border-slate-300">Actividades de Operación</h4>
-                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Recaudos Efectivos de Clientes</span><span class="font-bold text-green-600">+ ${formatCOP(t.ingresoRecaudado)}</span></div>
-                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Pagos a Proveedores y Gastos</span><span class="font-bold text-red-500">- ${formatCOP(t.gastoTotal)}</span></div>
-                    <div class="flex justify-between text-sm py-1 border-t mt-2 pt-2 font-bold bg-slate-50 p-2 print:bg-slate-100 print:border-slate-300"><span>Flujo Neto de Operación</span><span>${formatCOP(t.ingresoRecaudado - t.gastoTotal)}</span></div>
-                </div>
-                <div class="border rounded-xl p-4 bg-white shadow-sm print:border-slate-300 print:shadow-none print:bg-transparent">
-                    <h4 class="font-black text-indigo-800 border-b pb-2 mb-2 text-sm print:border-slate-300">Actividades de Inversión / Financiación</h4>
-                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Aportes de Capital (Socios)</span><span class="font-bold text-green-600">+ ${formatCOP(t.inversionTotal)}</span></div>
-                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Pago de Mantenimientos Extra</span><span class="font-bold text-red-500">- ${formatCOP(t.deudaMantenimientoTotal)}</span></div>
-                    <div class="flex justify-between text-sm py-1 border-t mt-2 pt-2 font-bold bg-slate-50 p-2 print:bg-slate-100 print:border-slate-300"><span>Flujo Neto de Financiación</span><span>${formatCOP(t.inversionTotal - t.deudaMantenimientoTotal)}</span></div>
-                </div>
-                <div class="bg-slate-800 text-white rounded-xl p-4 flex justify-between font-black text-lg print:bg-slate-200 print:text-black">
-                    <span>EFECTIVO FINAL EN CAJA:</span>
-                    <span>${formatCOP(App.getSaldoTotalCuentas())}</span>
-                </div>
-            </div>`;
-
-        const contentPatrimonio = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Cambios en el Patrimonio</h3></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">Este informe de control de capital detalla las mutaciones ocurridas en el Patrimonio Neto de la embarcación y los accionistas. Parte desde la base del Capital Social (inversión original), suma la totalidad de las utilidades que se causaron y generaron derechos económicos a favor, y descuenta aquellos valores destinados por fuerza mayor a solventar cruces de mantenimiento. Alimenta la base legal contable para repartición de dividendos de forma proporcional.</p>
-            <div class="w-full overflow-x-auto table-scroll">
-                <table class="w-full text-left text-xs sm:text-sm border-collapse border">
-                    <thead>
-                        <tr class="bg-slate-100 text-slate-700 border-b">
-                            <th class="p-3 font-bold border-r">Detalle</th>
-                            <th class="p-3 font-bold text-right border-r">Capital Social</th>
-                            <th class="p-3 font-bold text-right border-r">Utilidades Retenidas</th>
-                            <th class="p-3 font-bold text-right">Total Patrimonio</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr class="border-b">
-                            <td class="p-3 font-medium border-r">Saldos Iniciales</td>
-                            <td class="p-3 text-right border-r">${formatCOP(t.inversionTotal)}</td>
-                            <td class="p-3 text-right border-r">${formatCOP(0)}</td>
-                            <td class="p-3 text-right font-bold">${formatCOP(t.inversionTotal)}</td>
-                        </tr>
-                        <tr class="border-b bg-green-50/30 print:bg-transparent">
-                            <td class="p-3 font-medium border-r">+ Utilidad Integral del Periodo</td>
-                            <td class="p-3 text-right border-r">-</td>
-                            <td class="p-3 text-right border-r text-green-600 print:text-black">+ ${formatCOP(t.utilidadNeta)}</td>
-                            <td class="p-3 text-right font-bold text-green-600 print:text-black">+ ${formatCOP(t.utilidadNeta)}</td>
-                        </tr>
-                        <tr class="border-b bg-red-50/30 print:bg-transparent">
-                            <td class="p-3 font-medium border-r">- Cruce Mantenimiento Socio</td>
-                            <td class="p-3 text-right border-r">-</td>
-                            <td class="p-3 text-right border-r text-red-500 print:text-black">- ${formatCOP(t.deudaMantenimientoTotal)}</td>
-                            <td class="p-3 text-right font-bold text-red-500 print:text-black">- ${formatCOP(t.deudaMantenimientoTotal)}</td>
-                        </tr>
-                        <tr class="bg-slate-800 text-white font-black print:bg-slate-200 print:text-black">
-                            <td class="p-3 border-r">SALDO FINAL PATRIMONIO</td>
-                            <td class="p-3 text-right border-r">${formatCOP(t.inversionTotal)}</td>
-                            <td class="p-3 text-right border-r">${formatCOP(t.utilidadNeta - t.deudaMantenimientoTotal)}</td>
-                            <td class="p-3 text-right text-lg print:text-base">${formatCOP(t.inversionTotal + (t.utilidadNeta - t.deudaMantenimientoTotal))}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>`;
-
-        const vFiltroSoc = s.informePdfFiltro === 'Todos' ? s.viajes : s.viajes.filter(v => v.periodo === s.informePdfFiltro);
-        const utilidadPeriodoSoc = vFiltroSoc.reduce((acc, v) => acc + (Number(v.utilidadBruta)||0), 0); 
-        const tasaRecup = t.inversionTotal > 0 ? ((t.utilidadNeta / t.inversionTotal) * 100).toFixed(2) : 0;
-        const apalanc = t.utilidadNeta > 0 ? ((t.deudaMantenimientoTotal / t.utilidadNeta) * 100).toFixed(2) : 0;
-        const marNeto = t.ingresoTotal > 0 ? ((t.utilidadNeta / t.ingresoTotal) * 100).toFixed(2) : 0;
-
-        const contentSociosPdf = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Rendimiento Societario e Indicadores Financieros</h3></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">El Módulo de Rendimiento Societario ilustra y justifica de forma equitativa el estado financiero de cada uno de los inversores según su porcentaje de participación. Expresa la proyección porcentual de recuperación (Tasa ROI), y detalla explícitamente qué parte de la utilidad causada por cada inversionista se transfiere directamente a liquidación de deuda o cartera pre-existente, arrojando así la masa líquida monetaria final con derecho a retiro y libre distribución.</p>
-            <div class="grid grid-cols-3 gap-4 mb-6 print:mb-4">
-                <div class="border rounded-xl p-4 bg-white shadow-sm text-center print:border-slate-300 print:shadow-none">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Tasa Recuperación</p>
-                    <p class="text-xl font-black text-blue-600 print:text-black">${tasaRecup}%</p>
-                </div>
-                <div class="border rounded-xl p-4 bg-white shadow-sm text-center print:border-slate-300 print:shadow-none">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Apalancamiento</p>
-                    <p class="text-xl font-black text-red-500 print:text-black">${apalanc}%</p>
-                </div>
-                <div class="border rounded-xl p-4 bg-white shadow-sm text-center print:border-slate-300 print:shadow-none">
-                    <p class="text-[10px] font-bold text-slate-500 uppercase">Margen Neto Global</p>
-                    <p class="text-xl font-black text-green-600 print:text-black">${marNeto}%</p>
-                </div>
-            </div>
-            <div class="w-full overflow-x-auto table-scroll">
-                <table class="w-full text-left text-xs sm:text-sm border-collapse border">
-                    <thead>
-                        <tr class="bg-slate-100 text-slate-700 border-b">
-                            <th class="p-3 font-bold border-r">Inversionista</th>
-                            <th class="p-3 font-bold text-center border-r">% Part.</th>
-                            <th class="p-3 font-bold text-center border-r">ROI %</th>
-                            <th class="p-3 font-bold text-right border-r">Inversión Base</th>
-                            <th class="p-3 font-bold text-right border-r">Util. Causada</th>
-                            <th class="p-3 font-bold text-right border-r">Descuentos</th>
-                            <th class="p-3 font-bold text-right">Saldo Líquido</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${s.socios.map(socio => {
-                            const utilBruta = s.informePdfFiltro === 'Todos' ? (Number(socio.utilidadCausada)||0) : utilidadPeriodoSoc * (socio.porcentaje / 100);
-                            let liquido = utilBruta;
-                            if (socio.saldoMantenimiento < 0 && s.informePdfFiltro === 'Todos') {
-                                liquido = utilBruta - Math.abs(socio.saldoMantenimiento);
-                            }
-                            const roiSocio = socio.inversion > 0 ? ((utilBruta / socio.inversion) * 100).toFixed(1) : 0;
-                            return `
-                            <tr class="border-b">
-                                <td class="p-3 font-medium border-r">${socio.nombre}</td>
-                                <td class="p-3 text-center border-r font-bold text-blue-600 print:text-black">${socio.porcentaje}%</td>
-                                <td class="p-3 text-center border-r font-bold text-indigo-600 print:text-black">${roiSocio}%</td>
-                                <td class="p-3 text-right border-r">${formatCOP(socio.inversion)}</td>
-                                <td class="p-3 text-right border-r">${formatCOP(utilBruta)}</td>
-                                <td class="p-3 text-right border-r text-red-500 print:text-black">${socio.saldoMantenimiento < 0 ? formatCOP(socio.saldoMantenimiento) : '0'}</td>
-                                <td class="p-3 text-right font-bold ${liquido > 0 ? 'text-green-600' : 'text-red-600'} print:text-black">${formatCOP(liquido)}</td>
-                            </tr>`;
-                        }).join('')}
-                    </tbody>
-                </table>
-            </div>`;
-
-        if(s.niifTab === 'estado-situacion') {
-            content = contentBalance;
-        } else if (s.niifTab === 'resultados') {
-            content = contentResultados;
-        } else if (s.niifTab === 'flujo-efectivo') {
-            content = contentFlujo;
-        } else if (s.niifTab === 'patrimonio') {
-            content = contentPatrimonio;
-        }
-
-        const tabsNIIF = [
-            { id: 'informe-consolidado', label: 'Informe PDF' },
-            { id: 'estado-situacion', label: 'Balance General' },
-            { id: 'resultados', label: 'P&G' },
-            { id: 'flujo-efectivo', label: 'Flujo Efectivo' },
-            { id: 'patrimonio', label: 'Patrimonio' }
-        ];
-
-        return `
-        <div class="space-y-6 animate-fade-in print:m-0 print:p-0">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center print:hidden gap-3 sm:gap-0 mb-4">
-                <h2 class="text-xl sm:text-2xl font-black flex items-center text-slate-800"><i data-lucide="landmark" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> NIIF & Informes</h2>
-                <button onclick="window.print()" class="w-full sm:w-auto bg-red-600 text-white px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-black flex justify-center items-center hover:bg-red-700 transition shadow-sm">
-                    <i data-lucide="file-down" class="w-4 h-4 mr-2"></i> Exportar a PDF
-                </button>
             </div>
             
-            <div class="flex space-x-2 overflow-x-auto hide-scroll pb-2 print:hidden">
-                ${tabsNIIF.map(tab => `
-                    <button onclick="App.setNiifTab('${tab.id}')" class="px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl text-xs sm:text-sm font-bold border transition-colors shadow-sm whitespace-nowrap ${s.niifTab === tab.id ? 'bg-slate-800 text-white border-slate-900' : 'bg-white hover:bg-slate-50 text-slate-600'}">${tab.label.toUpperCase()}</button>
-                `).join('')}
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 md:p-8 min-h-[300px] sm:min-h-[400px] print:border-none print:shadow-none print:p-0 print:m-0">
-                <div class="print:hidden">
-                    ${content}
-                </div>
-                
-                <!-- SECCIÓN OCULTA EN PANTALLA, VISIBLE SOLO EN IMPRESIÓN (PDF) -->
-                <div class="hidden print:block" id="pdf-content">
-                    <div class="text-center border-b-2 border-slate-800 pb-4 mb-6">
-                        <h1 class="text-lg sm:text-xl md:text-2xl font-black uppercase text-slate-900 mt-2 print:mt-0">Informe de Gestión Operativa y Financiera Consolidado</h1>
-                        <h2 class="text-sm sm:text-lg font-bold text-slate-700 mt-1">Empresa: Don Sebe - M/N Greicy Jireth</h2>
-                        <p class="text-xs sm:text-sm font-semibold text-slate-500 mt-2">Documento Generado Automáticamente</p>
-                    </div>
-                    
-                    <div class="print-page-break mb-6">
-                        <div class="bg-slate-800 text-white p-3 font-bold text-xs sm:text-sm uppercase print:bg-slate-200 print:text-black">1. Comparativo de Ingresos y Utilidades</div>
-                        <table class="w-full text-left text-xs sm:text-sm border-collapse min-w-[700px]">
-                            <thead>
-                                <tr class="bg-slate-100 text-slate-600 border-b print:bg-slate-100">
-                                    <th class="p-3 font-bold border-r whitespace-nowrap">Periodo / Mes</th>
-                                    <th class="p-3 font-bold text-right border-r whitespace-nowrap">Ingreso Proy.</th>
-                                    <th class="p-3 font-bold text-right border-r whitespace-nowrap">Ingreso Real</th>
-                                    <th class="p-3 font-bold text-right border-r whitespace-nowrap">Util. Proy.</th>
-                                    <th class="p-3 font-bold text-right text-green-700 border-r whitespace-nowrap print:text-black">Util. Real (Caja)</th>
-                                    <th class="p-3 font-bold text-right text-orange-600 whitespace-nowrap print:text-black">Cartera Acum.</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${s.informePdfFiltro === 'Todos' ? `
-                                <tr class="bg-blue-50/50 border-b font-black text-slate-800 print:bg-transparent">
-                                    <td class="p-3 border-r whitespace-nowrap">TOTAL ACUMULADO</td>
-                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(totIngProy)}</td>
-                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(totIngReal)}</td>
-                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(totUtilProy)}</td>
-                                    <td class="p-3 text-right text-green-700 border-r whitespace-nowrap print:text-black">${formatCOP(totUtilReal)}</td>
-                                    <td class="p-3 text-right text-orange-600 whitespace-nowrap print:text-black">${formatCOP(totCartera)}</td>
-                                </tr>` : ''}
-                                ${periodosInfo.map(p => `
-                                <tr class="border-b hover:bg-slate-50">
-                                    <td class="p-3 border-r font-medium whitespace-nowrap">${p.periodo}</td>
-                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(p.ingresoProy)}</td>
-                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(p.ingresoReal)}</td>
-                                    <td class="p-3 text-right border-r whitespace-nowrap">${formatCOP(p.utilProy)}</td>
-                                    <td class="p-3 text-right font-bold text-green-700 border-r whitespace-nowrap print:text-black">${formatCOP(p.utilReal)}</td>
-                                    <td class="p-3 text-right font-bold text-orange-600 whitespace-nowrap print:text-black">${formatCOP(p.cartera)}</td>
-                                </tr>`).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-
-                    ${App.state.config.pdfIncludes.balance ? `<div>${contentBalance}</div>` : ''}
-                    ${App.state.config.pdfIncludes.resultados ? `<div class="print-page-break">${contentResultados}</div>` : ''}
-                    ${App.state.config.pdfIncludes.flujo ? `<div class="print-page-break">${contentFlujo}</div>` : ''}
-                    ${App.state.config.pdfIncludes.patrimonio ? `<div class="print-page-break">${contentPatrimonio}</div>` : ''}
-                    ${App.state.config.pdfIncludes.socios ? `<div class="print-page-break">${contentSociosPdf}</div>` : ''}
-                </div>
-            </div>
-        </div>`;
-    },
-
-    renderSociedad: () => {
-        const s = App.state;
-        const periodos = [...new Set(s.viajes.map(v => v.periodo))].filter(p=>p).sort();
-        const vFiltro = s.sociedadFiltroMes === 'Todos' ? s.viajes : s.viajes.filter(v => v.periodo === s.sociedadFiltroMes);
-        const utilidadPeriodo = vFiltro.reduce((acc, v) => acc + (Number(v.utilidadBruta)||0), 0); 
-        
-        const t = App.getTotales();
-        const tasaRecuperacion = t.inversionTotal > 0 ? ((t.utilidadNeta / t.inversionTotal) * 100).toFixed(2) : 0;
-        const apalancamiento = t.utilidadNeta > 0 ? ((t.deudaMantenimientoTotal / t.utilidadNeta) * 100).toFixed(2) : 0;
-        const margenNetoGlobal = t.ingresoTotal > 0 ? ((t.utilidadNeta / t.ingresoTotal) * 100).toFixed(2) : 0;
-
-        return `
-        <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 sm:gap-0">
-                <div><h2 class="text-2xl font-bold">Rendimiento Societario</h2><p class="text-sm text-slate-500">Distribución y Retorno de Inversión (ROI)</p></div>
-                <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                    <button onclick="window.App.openTransferModal()" class="bg-indigo-100 text-indigo-700 px-3 py-2 rounded-lg text-xs font-bold hover:bg-indigo-200 transition-colors shadow-sm flex items-center whitespace-nowrap"><i data-lucide="arrow-right-left" class="w-4 h-4 mr-1"></i> Transferir</button>
-                    <button onclick="window.App.state.isAddSocioOpen=true; window.App.state.editingSocioId=null; window.App.render()" class="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors shadow-sm flex items-center whitespace-nowrap"><i data-lucide="plus" class="w-4 h-4 mr-1"></i> Añadir Socio</button>
-                    <div class="flex items-center space-x-2 bg-white border border-slate-300 shadow-sm rounded-lg p-1.5 w-full sm:w-auto mt-2 sm:mt-0">
-                        <i data-lucide="calendar" class="w-4 h-4 text-slate-400 ml-1"></i>
-                        <select onchange="window.App.setFilterVal('sociedadFiltroMes', this.value)" class="text-sm font-medium outline-none bg-transparent cursor-pointer w-full">
-                            <option value="Todos" ${s.sociedadFiltroMes==='Todos'?'selected':''}>Histórico Total</option>
-                            ${periodos.map(m => `<option value="${m}" ${s.sociedadFiltroMes===m?'selected':''}>${m}</option>`).join('')}
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Indicadores Financieros Superiores -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">Tasa Recuperación Capital</p>
-                    <p class="text-2xl font-black text-blue-600">${tasaRecuperacion}%</p>
-                    <p class="text-[10px] text-slate-400 mt-1 leading-tight">Porcentaje de la inversión original de los socios que ya ha sido recuperada en utilidades.</p>
-                </div>
-                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">Apalancamiento / Deuda</p>
-                    <p class="text-2xl font-black text-red-500">${apalancamiento}%</p>
-                    <p class="text-[10px] text-slate-400 mt-1 leading-tight">Proporción de la deuda de mantenimiento global frente a la utilidad neta generada. A menor %, mejor.</p>
-                </div>
-                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide">Margen de Utilidad Global</p>
-                    <p class="text-2xl font-black text-green-600">${margenNetoGlobal}%</p>
-                    <p class="text-[10px] text-slate-400 mt-1 leading-tight">Mide la rentabilidad neta real de las ventas (Fletes) después de asumir todos los gastos del negocio.</p>
-                </div>
-            </div>
-
-            <div class="bg-blue-50 border border-blue-200 p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row justify-between items-start sm:items-center shadow-sm gap-2 sm:gap-0 mt-2">
-                <span class="text-blue-900 font-bold text-sm sm:text-base">Masa de Utilidad a Repartir (${s.sociedadFiltroMes}):</span>
-                <span class="text-blue-700 font-black text-2xl sm:text-3xl">${formatCOP(utilidadPeriodo)}</span>
-            </div>
-
-            <div class="bg-white rounded-2xl shadow-sm border overflow-hidden">
-                <div class="w-full overflow-x-auto table-scroll">
-                    <table class="w-full text-left border-collapse min-w-[900px]">
-                        <thead><tr class="bg-slate-800 border-b text-white text-[10px] sm:text-xs uppercase font-bold"><th class="p-3 sm:p-4">Inversionista</th><th class="p-3 sm:p-4 text-center">% Part.</th><th class="p-3 sm:p-4 text-center bg-indigo-900">ROI %</th><th class="p-3 sm:p-4 text-right">Inversión Base</th><th class="p-3 sm:p-4 text-right">Util. Causada</th><th class="p-3 sm:p-4 text-right">Descuentos</th><th class="p-3 sm:p-4 text-right bg-green-600">Saldo Líquido Actual</th></tr></thead>
-                        <tbody>
-                            ${s.socios.map(socio => {
-                                const utilBruta = s.sociedadFiltroMes === 'Todos' ? (Number(socio.utilidadCausada)||0) : utilidadPeriodo * (socio.porcentaje / 100);
-                                let liquido = utilBruta;
-                                if (socio.saldoMantenimiento < 0 && s.sociedadFiltroMes === 'Todos') {
-                                    const deudaAbs = Math.abs(socio.saldoMantenimiento);
-                                    liquido = utilBruta - deudaAbs;
-                                }
-                                
-                                // Calculo ROI Individual
-                                const roiSocio = socio.inversion > 0 ? ((utilBruta / socio.inversion) * 100).toFixed(1) : 0;
-
-                                return `
-                                <tr class="border-b hover:bg-slate-50 transition-colors cursor-pointer" onclick="window.App.openModalSocio(${socio.id})">
-                                    <td class="p-3 sm:p-4 flex items-center whitespace-nowrap"><div class="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center font-bold text-slate-600 mr-3 shadow-sm border shrink-0">${socio.nombre.charAt(0).toUpperCase()}</div><span class="font-bold text-slate-800">${socio.nombre}</span></td>
-                                    <td class="p-3 sm:p-4 text-center font-black text-blue-600 bg-blue-50/30 whitespace-nowrap">${socio.porcentaje}%</td>
-                                    <td class="p-3 sm:p-4 text-center font-black text-indigo-600 bg-indigo-50/30 whitespace-nowrap">${roiSocio}%</td>
-                                    <td class="p-3 sm:p-4 text-right text-xs sm:text-sm font-medium text-slate-600 whitespace-nowrap">${formatCOP(socio.inversion)}</td>
-                                    <td class="p-3 sm:p-4 text-right font-bold text-slate-700 whitespace-nowrap">${formatCOP(utilBruta)}</td>
-                                    <td class="p-3 sm:p-4 text-right text-[10px] sm:text-xs whitespace-nowrap"><span class="${socio.saldoMantenimiento < 0 ? 'text-red-600 font-black bg-red-50 border border-red-100 px-2 py-1.5 rounded-lg shadow-sm' : 'text-slate-400 font-medium'}">${socio.saldoMantenimiento < 0 ? formatCOP(socio.saldoMantenimiento) : 'A Paz y Salvo'}</span></td>
-                                    <td class="p-3 sm:p-4 text-right bg-green-50/50 font-black text-base sm:text-lg whitespace-nowrap ${liquido > 0 ? 'text-green-600' : (liquido < 0 ? 'text-red-600' : 'text-slate-400')}">${formatCOP(liquido)}</td>
-                                </tr>`;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>
+            <div class="bg-blue-50 rounded-2xl shadow-sm border border-blue-200 p-6 max-w-2xl">
+                <h3 class="font-bold text-lg text-blue-900 mb-2 border-b border-blue-200 pb-3 flex items-center"><i data-lucide="cloud-cog" class="w-5 h-5 mr-2 text-blue-600"></i> Sincronización Nube</h3>
+                <div class="flex items-center space-x-3 mb-4"><div class="w-3 h-3 rounded-full ${window.isFirebaseReady ? 'bg-green-500 animate-pulse' : 'bg-red-500'}"></div><span class="text-sm font-bold text-blue-900">${window.isFirebaseReady ? 'Conexión Activa' : 'Offline'}</span></div>
+                <button onclick="App.syncToCloud()" class="bg-blue-600 text-white px-5 py-3 rounded-xl font-bold w-full sm:w-auto"><i data-lucide="cloud-upload" class="w-5 h-5 inline mr-2"></i> Forzar Guardado</button>
             </div>
         </div>`;
     },
 
     renderModals: () => {
         let h = ''; const s = App.state;
-
         const modalContainerClass = "fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 print:hidden";
         const modalBoxClass = "bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 animate-slide-up shadow-2xl overflow-y-auto max-h-[90vh]";
 
-        // Teclado Numérico Nativo (Numpad)
-        if (s.numpad.isOpen) {
-            const formattedVal = formatCOP(Number(s.numpad.value));
-            h += `
-            <div class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/60 backdrop-blur-sm print:hidden">
-                <div class="bg-white w-full max-w-md rounded-t-3xl p-6 animate-slide-up shadow-2xl">
-                    <div class="flex justify-between items-center mb-4">
-                        <span class="text-sm font-bold text-slate-500 uppercase">${s.numpad.targetLabel}</span>
-                        <button onclick="window.App.closeNumpad()" class="text-slate-400 bg-slate-100 p-2 rounded-full hover:bg-slate-200"><i data-lucide="check" class="w-5 h-5 text-green-600"></i></button>
-                    </div>
-                    <div class="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-right mb-6">
-                        <p class="text-4xl font-black text-blue-900 tracking-tight break-all">${formattedVal}</p>
-                    </div>
-                    <div class="grid grid-cols-3 gap-3">
-                        ${['1','2','3','4','5','6','7','8','9','000','0','DEL'].map(k => `
-                            <button type="button" onclick="window.App.handleNumpadClick('${k}')" class="py-4 bg-slate-50 border border-slate-100 rounded-2xl text-2xl font-black text-slate-700 hover:bg-blue-100 active:scale-95 transition-all flex justify-center items-center shadow-sm">
-                                ${k === 'DEL' ? '<i data-lucide="delete" class="w-6 h-6 text-red-500"></i>' : k}
-                            </button>
-                        `).join('')}
-                    </div>
-                    <button type="button" onclick="window.App.handleNumpadClick('CLEAR')" class="w-full mt-3 py-3 text-sm font-bold text-slate-400 uppercase tracking-widest active:text-slate-600">Limpiar Todo</button>
-                </div>
-            </div>`;
-        }
-
-        // Modales Tesorería (Cuentas y Transacciones)
-        if (s.isAddCuentaOpen) {
-            const fCuenta = s.formTemp.cuenta;
-            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${s.editingCuentaId ? 'Editar Cuenta' : 'Nueva Cuenta/Caja'}</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitCuenta(event)" class="space-y-4">
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Nombre / Alias</label><input name="nombre" type="text" value="${fCuenta.nombre}" required placeholder="Ej: Banco Agrario, Caja Fuerte" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
-                <div class="grid grid-cols-2 gap-4"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Tipo</label><select name="tipo" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="banco" ${fCuenta.tipo==='banco'?'selected':''}>Banco</option><option value="caja" ${fCuenta.tipo==='caja'?'selected':''}>Caja Fuerte</option><option value="caja_menor" ${fCuenta.tipo==='caja_menor'?'selected':''}>Caja Menor</option></select></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">N° Cuenta (Opcional)</label><input name="numero" type="text" value="${fCuenta.numero}" placeholder="Ej: 123-456-789" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div></div>
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Saldo Base Inicial</label><div onclick="window.App.openNumpad('saldoInicial', 'Saldo Inicial de Apertura', 'cuenta')" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm bg-slate-50 text-slate-800 font-bold cursor-pointer hover:border-blue-400 truncate">${formatCOP(fCuenta.saldoInicial)}</div></div>
-                <button type="submit" class="w-full bg-blue-600 text-white font-black py-4 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all mt-2">Guardar Cuenta</button>
-                ${s.editingCuentaId ? `<button type="button" onclick="window.App.deleteCuenta(${s.editingCuentaId}, this)" class="w-full mt-2 text-red-500 font-bold text-sm p-3 border border-red-200 rounded-xl bg-red-50 hover:bg-red-600 hover:text-white transition-colors">Eliminar Cuenta</button>` : ''}
-                </form></div></div>`;
-        }
-
-        if (s.isAddTransaccionOpen) {
-            const fTx = s.formTemp.transaccion;
-            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Registrar Movimiento</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitTransaccionManual(event)" class="space-y-4">
+        // NUEVO MODAL: Gestión de Usuarios (Con PIN paramétrico)
+        if (s.isAddUsuarioOpen) {
+            const fU = s.formTemp.usuario;
+            const isEditing = !!s.editingUsuarioId;
+            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${isEditing ? 'Editar Usuario' : 'Autorizar Teléfono'}</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitUsuario(event)" class="space-y-4">
+                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Nombre del Usuario</label><input name="nombre" type="text" value="${fU.nombre}" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
+                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Celular (Sin código de país)</label><input name="telefono" type="tel" value="${fU.telefono}" required placeholder="3100000000" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
                 
-                <div class="space-y-2">
-                    <label class="text-xs font-bold text-slate-500 uppercase">Tipo de Movimiento</label>
-                    <div class="grid grid-cols-3 gap-2">
-                        <button type="button" onclick="window.App.state.formTemp.transaccion.tipo='ingreso'; window.App.render()" class="p-3 rounded-xl border-b-4 font-bold text-xs flex flex-col items-center justify-center transition-all ${fTx.tipo==='ingreso'?'bg-green-100 border-green-500 text-green-800 translate-y-1 shadow-inner':'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 shadow-sm hover:border-green-200'}"><i data-lucide="arrow-down-circle" class="mb-1 w-5 h-5 ${fTx.tipo==='ingreso'?'text-green-600':''}"></i> Ingreso</button>
-                        <button type="button" onclick="window.App.state.formTemp.transaccion.tipo='egreso'; window.App.render()" class="p-3 rounded-xl border-b-4 font-bold text-xs flex flex-col items-center justify-center transition-all ${fTx.tipo==='egreso'?'bg-red-100 border-red-500 text-red-800 translate-y-1 shadow-inner':'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 shadow-sm hover:border-red-200'}"><i data-lucide="arrow-up-circle" class="mb-1 w-5 h-5 ${fTx.tipo==='egreso'?'text-red-600':''}"></i> Egreso</button>
-                        <button type="button" onclick="window.App.state.formTemp.transaccion.tipo='transferencia'; window.App.render()" class="p-3 rounded-xl border-b-4 font-bold text-[10px] sm:text-xs flex flex-col items-center justify-center transition-all ${fTx.tipo==='transferencia'?'bg-indigo-100 border-indigo-500 text-indigo-800 translate-y-1 shadow-inner':'bg-white border-slate-200 text-slate-500 hover:bg-slate-50 shadow-sm hover:border-indigo-200'}"><i data-lucide="arrow-right-left" class="mb-1 w-5 h-5 ${fTx.tipo==='transferencia'?'text-indigo-600':''}"></i> Traspaso</button>
-                    </div>
+                <div class="space-y-1">
+                    <label class="text-xs font-bold text-slate-500 uppercase">Nivel de Acceso</label>
+                    <select name="rol" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm outline-none bg-white" onchange="document.getElementById('pin-container').style.display = this.value === 'admin' ? 'block' : 'none'">
+                        <option value="editor" ${fU.rol==='editor'?'selected':''}>Editor (Tripulante - Viajes/Gastos)</option>
+                        <option value="admin" ${fU.rol==='admin'?'selected':''}>Administrador (Control Total)</option>
+                    </select>
+                </div>
+                
+                <div id="pin-container" class="space-y-1 bg-blue-50 p-4 border border-blue-200 rounded-xl" style="display: ${fU.rol === 'admin' ? 'block' : 'none'}">
+                    <label class="text-xs font-bold text-blue-800 uppercase flex items-center mb-2"><i data-lucide="shield-alert" class="w-4 h-4 mr-1"></i> Asignar PIN de Seguridad</label>
+                    <input name="pin" type="text" value="${fU.pin || ''}" placeholder="Ej: 1234" class="w-full border-2 border-blue-300 p-3 rounded-xl text-sm focus:border-blue-600 outline-none font-bold tracking-widest text-center"/>
+                    <p class="text-[10px] text-blue-600 mt-2 text-center">Requerido para que el administrador inicie sesión.</p>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4"><div class="col-span-2 sm:col-span-1 space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Fecha</label><input name="fecha" type="date" value="${fTx.fecha}" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div><div class="col-span-2 sm:col-span-1 space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Valor ($)</label><div onclick="window.App.openNumpad('monto', 'Valor de la Transacción', 'transaccion')" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm bg-slate-50 text-slate-800 font-bold cursor-pointer hover:border-blue-400 truncate">${formatCOP(fTx.monto)}</div></div></div>
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">${fTx.tipo === 'transferencia' ? 'Cuenta Origen (Retiro)' : 'Cuenta Afectada'}</label><select name="cuentaId" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm outline-none bg-white"><option value="">Seleccione cuenta...</option>${s.cuentas.map(c => `<option value="${c.id}">${c.nombre} (Disp: ${formatCOP(App.getSaldoCuenta(c.id))})</option>`).join('')}</select></div>
-                ${fTx.tipo === 'transferencia' ? `<div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase text-indigo-600">Cuenta Destino (Ingreso)</label><select name="cuentaDestinoId" required class="w-full border-2 border-indigo-200 p-3 rounded-xl text-sm outline-none bg-indigo-50"><option value="">Seleccione cuenta destino...</option>${s.cuentas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>` : ''}
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Concepto / Detalle</label><textarea name="concepto" required placeholder="Motivo de la transacción..." class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none h-16 resize-none">${fTx.concepto}</textarea></div>
-                <button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Confirmar Transacción</button></form></div></div>`;
+                <button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 transition-all mt-2">Guardar Acceso</button></form></div></div>`;
         }
 
-        // Formulario Agregar / Editar Viaje (Con Tesorería Integrada)
-        if (s.isAddViajeOpen) {
-            const fViaje = s.formTemp.viaje;
-            const titulo = s.editingViajeId ? 'Editar Viaje' : 'Registrar Viaje';
-            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${titulo}</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitViaje(event)" class="space-y-4"><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Fecha</label><input name="fecha" type="date" value="${fViaje.fecha}" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 focus:ring-0 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Ruta</label><input name="ruta" type="text" value="${fViaje.ruta}" placeholder="Ej: B/tura - Charco" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none transition-colors"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Productos</label><input name="productos" type="text" value="${fViaje.productos || ''}" placeholder="Carga principal..." class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Clientes</label><input name="clientesAsociados" type="text" value="${fViaje.clientesAsociados || ''}" placeholder="Ej: Oscar, Alex..." class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Ingreso Bruto</label><div onclick="window.App.openNumpad('ingreso', 'Ingreso Bruto Total', 'viaje')" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm bg-slate-50 text-slate-800 font-bold cursor-pointer hover:border-blue-400 truncate">${formatCOP(fViaje.ingreso)}</div></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Gastos Ope.</label><div onclick="window.App.openNumpad('gastos', 'Gastos Operativos', 'viaje')" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm bg-slate-50 text-slate-800 font-bold cursor-pointer hover:border-blue-400 truncate">${formatCOP(fViaje.gastos)}</div></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Pago Flete</label><div onclick="window.App.openNumpad('pagoFlete', 'Pagos de Fletes', 'viaje')" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm bg-slate-50 text-slate-800 font-bold cursor-pointer hover:border-blue-400 truncate">${formatCOP(fViaje.pagoFlete || 0)}</div></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Pago Cargue</label><div onclick="window.App.openNumpad('pagoCargue', 'Pagos de Cargue', 'viaje')" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm bg-slate-50 text-slate-800 font-bold cursor-pointer hover:border-blue-400 truncate">${formatCOP(fViaje.pagoCargue || 0)}</div></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Cartera (Deuda)</label><div onclick="window.App.openNumpad('cartera', 'Deuda Acumulada del Viaje', 'viaje')" class="w-full border-2 border-orange-200 p-3 rounded-xl text-sm bg-orange-50 text-orange-800 font-bold cursor-pointer hover:border-orange-500 truncate">${formatCOP(fViaje.cartera)}</div></div><div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Observaciones</label><textarea name="observaciones" placeholder="Detalles extra del viaje..." class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none h-16 resize-none">${fViaje.observaciones}</textarea></div>
-                <!-- Asignación Financiera Integrada -->
-                ${!s.editingViajeId ? `
-                <div class="bg-blue-50/50 p-4 rounded-xl border border-blue-100 space-y-3 mt-4">
-                    <h4 class="font-bold text-sm text-blue-900 flex items-center"><i data-lucide="wallet" class="w-4 h-4 mr-2"></i> Flujo de Caja</h4>
-                    <div class="space-y-1"><label class="text-[10px] font-bold text-slate-500 uppercase">¿A dónde ingresa el recaudo?</label><select name="cuentaIngresoId" class="w-full border border-slate-300 p-2.5 rounded-lg text-sm outline-none bg-white"><option value="">Seleccione cuenta...</option>${s.cuentas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
-                    <div class="space-y-1"><label class="text-[10px] font-bold text-slate-500 uppercase">¿De dónde salen los gastos?</label><select name="cuentaEgresoId" class="w-full border border-slate-300 p-2.5 rounded-lg text-sm outline-none bg-white"><option value="">Seleccione cuenta...</option>${s.cuentas.map(c => `<option value="${c.id}">${c.nombre} (Disp: ${formatCOP(App.getSaldoCuenta(c.id))})</option>`).join('')}</select></div>
-                </div>` : ''}
-                <button type="submit" class="w-full bg-blue-600 text-white font-black py-4 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all mt-2">Guardar Consolidado</button></form></div></div>`;
-        }
-        
-        // Modal Detalle Cliente
-        if (s.isAddClienteOpen) {
-            const fClient = s.formTemp.cliente;
-            const titulo = s.editingClienteId ? 'Editar Registro' : 'Registrar Cliente';
-            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${titulo}</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitCliente(event)" class="space-y-4"><input name="nombre" type="text" value="${fClient.nombre}" placeholder="Nombre Comercial o Persona" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="nit" type="text" value="${fClient.nit === 'N/A' ? '' : fClient.nit}" placeholder="NIT / Cédula" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><div class="grid grid-cols-2 gap-3"><select name="segmento" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="Persona Común" ${fClient.segmento==='Persona Común'?'selected':''}>Persona Común</option><option value="Comerciante" ${fClient.segmento==='Comerciante'?'selected':''}>Comerciante</option><option value="Proyecto" ${fClient.segmento==='Proyecto'?'selected':''}>Proyecto G/P</option><option value="Interno" ${fClient.segmento==='Interno'?'selected':''}>Socio Interno</option></select><select name="tipo" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="Comercio de Madera" ${fClient.tipo.includes('Madera')?'selected':''}>Comercio Madera</option><option value="Materiales Construcción" ${fClient.tipo.includes('Construcción')?'selected':''}>Materiales Cons.</option><option value="Equipos e Insumos" ${fClient.tipo.includes('Insumos')?'selected':''}>Insumos/Equipos</option><option value="General" ${fClient.tipo.includes('General')?'selected':''}>General / Otros</option></select></div><input name="telefono" type="text" value="${fClient.telefono}" placeholder="Teléfono Móvil" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="ubicacion" type="text" value="${fClient.ubicacion}" placeholder="Ubicación Detallada" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Guardar Cliente</button></form></div></div>`;
-        }
-        
-        // Modal Liquidación Nómina Avanzado
-        if (s.isAddNominaOpen) {
-            const tripulacion = s.formTemp.nominaCrew || [];
-            const totalPagado = tripulacion.filter(t=>t.activo).reduce((a, c) => a + (c.valorDia * c.dias), 0);
-
-            h += `<div class="${modalContainerClass}"><div class="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl p-6 animate-slide-up shadow-2xl overflow-y-auto max-h-[90vh]"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">Liquidar Tripulación</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitNomina(event)" class="space-y-4">
-                <div class="grid grid-cols-2 gap-4"><input name="fecha" type="date" value="${s.formTemp.nomina.fecha}" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><select name="viaje" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="">Seleccionar Viaje</option>${s.viajes.map(v => `<option value="${v.viaje}">${v.viaje} (${v.periodo})</option>`).join('')}</select></div>
-                <div class="grid grid-cols-2 gap-4"><input name="productosAsociados" type="text" placeholder="Productos/Carga..." class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="clientesAsociados" type="text" placeholder="Clientes asociados..." class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
-                <div class="border border-slate-200 rounded-xl overflow-hidden"><div class="bg-slate-100 px-4 py-2 flex justify-between text-[10px] font-bold text-slate-500 uppercase"><span>Tripulante</span><span>Días Trabajo</span></div><div class="max-h-52 overflow-y-auto">
-            ${tripulacion.map(n => `
-                <div class="flex items-center justify-between p-3 border-t hover:bg-slate-50 ${!n.activo ? 'opacity-50 grayscale' : ''}">
-                    <div class="flex items-center space-x-3">
-                        <input type="checkbox" ${n.activo ? 'checked' : ''} onchange="window.App.toggleNominaCrew(${n.id})" class="w-5 h-5 rounded text-blue-600 focus:ring-0 cursor-pointer">
-                        <div><p class="font-bold text-sm text-slate-800">${n.cargo}</p><p class="text-[10px] text-slate-500">${formatCOP(n.valorDia)}/día</p></div>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <input type="number" min="1" max="30" value="${n.dias}" onchange="window.App.updateNominaDias(${n.id}, this.value)" ${!n.activo ? 'disabled' : ''} class="w-16 border rounded-lg p-1 text-center font-bold text-sm outline-none focus:border-blue-500">
-                        <span class="text-xs font-bold text-slate-700 w-20 text-right">${formatCOP(n.activo ? n.valorDia * n.dias : 0)}</span>
-                    </div>
-                </div>
-            `).join('')}
-            </div></div>
-            <div class="space-y-1 mt-4"><label class="text-[10px] font-bold text-slate-500 uppercase text-red-600">Cuenta de Salida (Pago desde)</label><select name="cuentaId" required class="w-full border-2 border-red-200 p-3 rounded-xl text-sm outline-none bg-red-50"><option value="">Seleccione cuenta origen...</option>${s.cuentas.map(c => `<option value="${c.id}">${c.nombre} (Disp: ${formatCOP(App.getSaldoCuenta(c.id))})</option>`).join('')}</select></div>
-            <div class="bg-blue-50 border border-blue-100 p-5 rounded-xl text-center mt-4 shadow-inner flex justify-between items-center"><p class="text-xs font-bold text-blue-800 uppercase tracking-widest">Total Nómina</p><p class="text-2xl font-black text-blue-600 drop-shadow-sm">${formatCOP(totalPagado)}</p></div><button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-4">Procesar Liquidación</button></form></div></div>`;
-        }
-
-        // Modal Detalle Viaje
+        // Detalle Viaje Modificado (Para ocultar botones si es cliente)
         if (s.selectedViaje) {
             const v = s.selectedViaje;
             h += `<div class="${modalContainerClass}" onclick="window.App.closeModals()">
@@ -1396,7 +589,7 @@ const App = {
                     <div class="p-5 border-b bg-slate-50 flex justify-between items-center shrink-0">
                         <div><h3 class="font-black text-xl text-slate-800">${v.viaje}</h3><p class="text-[10px] font-bold text-slate-500 uppercase">${v.periodo} • ${v.fecha}</p></div>
                         <div class="flex space-x-2">
-                            <button onclick="window.App.editViaje(${v.id})" class="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition-colors"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+                            ${App.canEdit() ? `<button onclick="window.App.editViaje(${v.id})" class="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition-colors"><i data-lucide="edit-3" class="w-4 h-4"></i></button>` : ''}
                             <button onclick="window.App.closeModals()" class="bg-slate-200 p-2 rounded-full text-slate-500 hover:bg-slate-300 transition-colors"><i data-lucide="x" class="w-4 h-4"></i></button>
                         </div>
                     </div>
@@ -1404,258 +597,172 @@ const App = {
                         <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs sm:text-sm grid grid-cols-2 gap-2">
                             <div><span class="block text-[10px] font-bold text-slate-400 uppercase">Ruta</span><span class="font-black text-slate-800">${v.ruta}</span></div>
                             <div><span class="block text-[10px] font-bold text-slate-400 uppercase">Productos / Carga</span><span class="font-bold text-blue-600">${v.productos || 'N/A'}</span></div>
-                            <div class="col-span-2 mt-1"><span class="block text-[10px] font-bold text-slate-400 uppercase">Clientes Involucrados</span><span class="font-medium text-slate-700">${v.clientesAsociados || 'N/A'}</span></div>
                         </div>
                         <div class="grid grid-cols-2 gap-3 sm:gap-4">
-                            <div class="bg-blue-50 p-3 sm:p-4 rounded-2xl border border-blue-100"><p class="text-[10px] sm:text-xs text-blue-700 font-bold uppercase mb-1">Ingreso Bruto</p><p class="font-black text-sm sm:text-lg text-blue-900">${formatCOP(v.ingreso)}</p></div>
-                            <div class="bg-red-50 p-3 sm:p-4 rounded-2xl border border-red-100"><p class="text-[10px] sm:text-xs text-red-700 font-bold uppercase mb-1">Costos Ope.</p><p class="font-black text-sm sm:text-lg text-red-900">${formatCOP(v.gastos)}</p></div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-3 sm:gap-4">
-                            <div class="bg-green-50 p-3 sm:p-4 rounded-2xl border border-green-100"><p class="text-[10px] sm:text-xs text-green-700 font-bold uppercase mb-1">Pago Fletes</p><p class="font-black text-sm sm:text-lg text-green-900">${formatCOP(v.pagoFlete || 0)}</p></div>
-                            <div class="bg-indigo-50 p-3 sm:p-4 rounded-2xl border border-indigo-100"><p class="text-[10px] sm:text-xs text-indigo-700 font-bold uppercase mb-1">Pago Cargue</p><p class="font-black text-sm sm:text-lg text-indigo-900">${formatCOP(v.pagoCargue || 0)}</p></div>
+                            <div class="bg-blue-50 p-3 sm:p-4 rounded-2xl border border-blue-100"><p class="text-[10px] sm:text-xs text-blue-700 font-bold uppercase mb-1">Flete Total</p><p class="font-black text-sm sm:text-lg text-blue-900">${formatCOP(v.ingreso)}</p></div>
+                            <div class="bg-orange-50 p-3 sm:p-4 rounded-2xl border border-orange-100"><p class="text-[10px] sm:text-xs text-orange-700 font-bold uppercase mb-1">Deuda Pendiente</p><p class="font-black text-sm sm:text-lg text-orange-900">${formatCOP(v.cartera)}</p></div>
                         </div>
                         <div class="bg-slate-800 p-4 rounded-2xl flex justify-between items-center shadow-inner">
-                            <span class="font-bold text-slate-300 text-[10px] sm:text-sm uppercase tracking-wide">Recaudado / Caja</span>
+                            <span class="font-bold text-slate-300 text-[10px] sm:text-sm uppercase tracking-wide">Flete Pagado</span>
                             <span class="font-black text-lg sm:text-2xl text-white">${formatCOP(v.ingresoRecaudado)}</span>
                         </div>
+                        ${App.isAdmin() ? `
                         <div class="flex items-center justify-between border-t pt-4 mt-2">
-                            <span class="font-bold text-orange-600 text-xs">Deuda (Cartera): ${formatCOP(v.cartera)}</span>
                             <button onclick="window.App.deleteViaje(${v.id}, this)" class="bg-slate-100 text-red-600 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-50 transition-colors">Eliminar Viaje</button>
-                        </div>
+                        </div>` : ''}
                     </div>
                 </div>
             </div>`;
         }
-
-        // Modal Detalle Cliente
-        if (s.selectedCliente) {
-            const c = s.selectedCliente;
-            const viajesRelacionados = s.viajes.filter(v => (v.clientesAsociados && v.clientesAsociados.includes(c.nombre)) || (v.observaciones && v.observaciones.includes(c.nombre)));
-            const deudaTotal = viajesRelacionados.reduce((acc, v) => acc + (Number(v.cartera) || 0), 0);
-
-            h += `<div class="${modalContainerClass}" onclick="window.App.closeModals()">
-                <div class="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden animate-slide-up shadow-2xl flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
-                    <div class="p-5 border-b bg-slate-50 flex justify-between items-center shrink-0">
-                        <div class="flex items-center"><div class="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-black mr-3">${c.nombre.charAt(0).toUpperCase()}</div><div><h3 class="font-black text-lg text-slate-800">${c.nombre}</h3><p class="text-[10px] font-bold text-slate-500 uppercase">${c.segmento} • ${c.nit}</p></div></div>
-                        <div class="flex space-x-2">
-                            <button onclick="window.App.editCliente(${c.id})" class="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition-colors"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
-                            <button onclick="window.App.closeModals()" class="bg-slate-200 p-2 rounded-full text-slate-500 hover:bg-slate-300 transition-colors"><i data-lucide="x" class="w-4 h-4"></i></button>
-                        </div>
-                    </div>
-                    <div class="p-5 sm:p-6 overflow-y-auto">
-                        <div class="bg-orange-50 p-4 sm:p-5 rounded-2xl border border-orange-200 text-center mb-5 shadow-inner">
-                            <p class="text-[10px] text-orange-800 font-bold uppercase tracking-widest mb-1">Deuda Activa General</p>
-                            <p class="text-2xl sm:text-3xl font-black text-orange-600 drop-shadow-sm">${formatCOP(deudaTotal)}</p>
-                        </div>
-                        <h4 class="font-bold text-slate-800 mb-3 text-xs sm:text-sm flex items-center"><i data-lucide="activity" class="w-4 h-4 mr-1 text-slate-400"></i> Línea de Tiempo (Viajes y Cargas)</h4>
-                        <div class="space-y-3 mb-5 max-h-56 overflow-y-auto pr-2">
-                            ${viajesRelacionados.length > 0 ? viajesRelacionados.map(vr => `
-                                <div class="bg-white border border-slate-200 p-3 rounded-xl shadow-sm relative">
-                                    <div class="absolute w-1 h-full bg-blue-400 left-0 top-0 rounded-l-xl"></div>
-                                    <div class="pl-2">
-                                        <div class="flex justify-between items-start mb-1"><p class="font-black text-slate-700 text-sm">${vr.viaje} <span class="text-[10px] text-slate-400 ml-1 font-normal">${vr.fecha}</span></p><span class="text-[10px] bg-slate-100 px-2 py-0.5 rounded font-bold text-slate-600">${vr.ruta}</span></div>
-                                        <p class="text-[11px] text-slate-600 mb-2 font-medium">Carga: <span class="text-blue-600">${vr.productos || 'General'}</span></p>
-                                    </div>
-                                </div>
-                            `).join('') : '<p class="text-xs text-slate-400 text-center py-2">No hay viajes registrados con este cliente.</p>'}
-                        </div>
-                        <div class="flex items-center justify-between border-t border-slate-100 pt-4 mt-2">
-                            <button onclick="window.App.deleteCliente(${c.id}, this)" class="bg-slate-100 text-red-600 px-4 py-2 rounded-xl text-xs font-bold hover:bg-red-50 transition-colors w-full flex justify-center items-center"><i data-lucide="trash-2" class="w-4 h-4 mr-2"></i> Eliminar Registro</button>
-                        </div>
-                    </div>
-                </div>
-            </div>`;
-        }
-
-        // Modal Detalle Socio
-        if (s.selectedSocio) {
-            const socio = s.selectedSocio;
-            h += `<div class="${modalContainerClass}" onclick="window.App.closeModals()">
-                <div class="bg-white w-full max-w-sm rounded-t-3xl sm:rounded-3xl overflow-hidden animate-slide-up shadow-2xl flex flex-col max-h-[90vh]" onclick="event.stopPropagation()">
-                    <div class="p-5 border-b bg-slate-50 flex justify-between items-center shrink-0">
-                        <div class="flex items-center"><div class="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center font-black mr-3 shadow-sm border shrink-0">${socio.nombre.charAt(0).toUpperCase()}</div><div><h3 class="font-black text-lg text-slate-800">${socio.nombre}</h3><p class="text-[10px] font-bold text-slate-500 uppercase">Participación: ${socio.porcentaje}%</p></div></div>
-                        <div class="flex space-x-2">
-                            <button onclick="window.App.editSocio(${socio.id})" class="bg-blue-100 p-2 rounded-full text-blue-600 hover:bg-blue-200 transition-colors"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
-                            <button onclick="window.App.closeModals()" class="bg-slate-200 p-2 rounded-full text-slate-500 hover:bg-slate-300 transition-colors"><i data-lucide="x" class="w-4 h-4"></i></button>
-                        </div>
-                    </div>
-                    <div class="p-6 space-y-4">
-                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                            <p class="text-[10px] uppercase font-bold text-slate-400 mb-1">Capital Invertido (Base)</p>
-                            <p class="font-black text-slate-800 text-xl">${formatCOP(socio.inversion)}</p>
-                        </div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <div class="bg-green-50 p-3 rounded-xl border border-green-100 text-center"><p class="text-[10px] uppercase font-bold text-green-700 mb-1">Util. Total Causada</p><p class="font-black text-green-800 text-sm">${formatCOP(socio.utilidadCausada)}</p></div>
-                            <div class="bg-red-50 p-3 rounded-xl border border-red-100 text-center"><p class="text-[10px] uppercase font-bold text-red-700 mb-1">Deuda (Mantenimiento)</p><p class="font-black text-red-800 text-sm">${formatCOP(socio.saldoMantenimiento)}</p></div>
-                        </div>
-                        <div class="border-t pt-4 mt-2">
-                            <button onclick="window.App.deleteSocio(${socio.id}, this)" class="bg-slate-100 text-red-600 px-4 py-3 rounded-xl text-xs font-bold hover:bg-red-50 transition-colors w-full flex justify-center items-center"><i data-lucide="trash-2" class="w-4 h-4 mr-2"></i> Eliminar Registro</button>
-                        </div>
-                    </div>
-                </div>
-            </div>`;
-        }
-
-        // Formulario Agregar / Editar Socio
-        if (s.isAddSocioOpen) {
-            const fSocio = s.formTemp.socio;
-            const titulo = s.editingSocioId ? 'Editar Inversor' : 'Nuevo Inversor';
-            const isDeuda = s.editingSocioId ? (App.state.socios.find(x => x.id === s.editingSocioId).saldoMantenimiento < 0) : true;
-            
-            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${titulo}</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitSocio(event)" class="space-y-4">
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Nombre o Razón Social</label><input name="nombre" type="text" value="${fSocio.nombre}" required placeholder="Ej: Socio Principal" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Porcentaje de Participación (%)</label><input name="porcentaje" type="number" step="0.01" min="0" max="100" value="${fSocio.porcentaje}" required placeholder="Ej: 15.5" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Capital Invertido</label><div onclick="window.App.openNumpad('inversion', 'Inversión Base', 'socio')" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm bg-slate-50 text-slate-800 font-bold cursor-pointer hover:border-blue-400 truncate">${formatCOP(fSocio.inversion)}</div></div>
-                ${!s.editingSocioId ? `<div class="space-y-1 bg-green-50 p-3 rounded-xl border border-green-200"><label class="text-[10px] font-bold text-green-700 uppercase">¿A qué cuenta ingresa esta inversión?</label><select name="cuentaId" required class="w-full border border-green-300 p-2 rounded text-sm outline-none bg-white"><option value="">Seleccione cuenta destino...</option>${s.cuentas.map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>` : ''}
-                <div class="grid grid-cols-5 gap-3 items-end">
-                    <div class="col-span-3 space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Saldo Mantenimiento Extra</label><div onclick="window.App.openNumpad('saldoMantenimiento', 'Saldo de Mantenimiento', 'socio')" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm bg-slate-50 text-slate-800 font-bold cursor-pointer hover:border-blue-400 truncate">${formatCOP(fSocio.saldoMantenimiento)}</div></div>
-                    <div class="col-span-2 space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Tipo</label><select name="tipoSaldo" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="deuda" ${isDeuda ? 'selected' : ''}>Es Deuda (-)</option><option value="favor" ${!isDeuda ? 'selected' : ''}>A Favor (+)</option></select></div>
-                </div>
-                <button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Guardar Socio</button></form></div></div>`;
-        }
-
-        // Modal Transferir Acciones
-        if (s.isTransferOpen) {
-            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800"><i data-lucide="arrow-right-left" class="w-5 h-5 inline mr-2 text-indigo-600"></i> Transferir Acciones</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div>
-                <p class="text-xs text-slate-500 mb-4">Esta acción descontará el porcentaje y capital base proporcional del socio origen, sumándolo al socio receptor.</p>
-                <form onsubmit="window.App.submitTransferencia(event)" class="space-y-4">
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Vendedor (Quien cede)</label><select name="vendedor" required class="w-full border-2 border-red-200 p-3 rounded-xl text-sm outline-none bg-red-50 text-red-900"><option value="">Seleccione origen...</option>${s.socios.map(socio => `<option value="${socio.id}">${socio.nombre} (Tiene: ${socio.porcentaje}%)</option>`).join('')}</select></div>
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Comprador (Quien recibe)</label><select name="comprador" required class="w-full border-2 border-green-200 p-3 rounded-xl text-sm outline-none bg-green-50 text-green-900"><option value="">Seleccione receptor...</option>${s.socios.map(socio => `<option value="${socio.id}">${socio.nombre} (Tiene: ${socio.porcentaje}%)</option>`).join('')}</select></div>
-                <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Porcentaje a Transferir (%)</label><input name="porcentaje" type="number" step="0.01" min="0.01" max="100" required placeholder="Ej: 5.0" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
-                <button type="submit" class="w-full bg-indigo-600 text-white font-black py-4 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition-all mt-4">Ejecutar Transferencia</button></form></div></div>`;
-        }
-
+        
         return h;
     },
 
-    // Renderizador Principal
     render: () => {
         const root = document.getElementById('app-root');
         
+        // 🔒 GATEWAY DE SEGURIDAD (Lock Screen)
+        if (!App.state.userSession) {
+            root.innerHTML = App.renderLogin();
+            if (window.lucide) window.lucide.createIcons();
+            return;
+        }
+
+        // Navegación Filtrada por Roles
+        const allowedNavItems = App.navItems.filter(item => item.roles.includes(App.state.userSession.rol));
+        
+        // Protección de Ruta
+        if (!allowedNavItems.find(i => i.id === App.state.activeTab)) {
+            App.state.activeTab = 'dashboard';
+        }
+
         let mainContent = '';
         switch(App.state.activeTab) {
             case 'dashboard': mainContent = App.renderDashboard(); break;
-            case 'tesoreria': mainContent = App.renderTesoreria(); break;
             case 'viajes': mainContent = App.renderViajes(); break;
-            case 'cartera': mainContent = App.renderCartera(); break;
-            case 'documentos': mainContent = App.renderDocumentos(); break;
-            case 'nomina': mainContent = App.renderNomina(); break;
-            case 'clientes': mainContent = App.renderClientes(); break;
-            case 'finanzas': mainContent = App.renderNIIF(); break;
-            case 'sociedad': mainContent = App.renderSociedad(); break;
-            case 'basedatos': mainContent = App.renderBaseDatos(); break;
+            case 'cartera': mainContent = App.renderCartera(); break; 
+            case 'tesoreria': mainContent = App.renderTesoreria ? App.renderTesoreria() : ''; break;
             case 'config': mainContent = App.renderConfig(); break;
+            default: mainContent = App.renderDashboard();
         }
+
+        const syncStatusUI = App.state.isSyncingData 
+            ? `<i data-lucide="refresh-cw" class="w-3 h-3 mr-2 animate-spin text-blue-400"></i> Guardando...` 
+            : (window.isFirebaseReady 
+                ? (App.state.syncQueue.length > 0 
+                    ? `<div class="w-2 h-2 bg-orange-400 animate-pulse rounded-full mr-2"></div> Pendientes: ${App.state.syncQueue.length}` 
+                    : `<div class="w-2 h-2 bg-green-400 rounded-full mr-2"></div> Auto-Guardado ON`) 
+                : `<div class="w-2 h-2 bg-red-400 rounded-full mr-2"></div> Offline`);
 
         root.innerHTML = `
             ${App.renderModals()}
             
             <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden shadow-sm sticky top-0">
                 <div class="flex items-center">
-                    ${App.state.activeTab !== 'dashboard' ? `<button onclick="window.App.setTab('dashboard')" class="mr-3 sm:mr-4 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
                     <h1 onclick="window.App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> Don Sebe</h1>
                 </div>
-                <div class="bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold shadow-md flex items-center"><div class="w-2 h-2 ${window.isFirebaseReady ? 'bg-green-400 animate-pulse' : 'bg-red-400'} rounded-full mr-2"></div> ${window.isFirebaseReady ? 'Cloud Sync' : 'Modo Offline (Local)'}</div>
+                <div class="flex space-x-2">
+                    <div class="bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold shadow-md flex items-center transition-all min-w-[120px] justify-center">${syncStatusUI}</div>
+                    <button onclick="window.App.handleLogout()" class="bg-red-50 text-red-600 p-1.5 rounded-full hover:bg-red-100 transition-colors"><i data-lucide="log-out" class="w-4 h-4"></i></button>
+                </div>
             </header>
-            
-            <main class="flex-1 overflow-y-auto p-4 md:p-6 pb-8 bg-slate-50 print:bg-white print:p-0 print:overflow-visible">
-                <div class="max-w-6xl mx-auto">${mainContent}</div>
-            </main>
 
-            <!-- FAB Botón Flotante -->
-            <div class="fixed bottom-6 right-6 z-50 print:hidden flex flex-col items-end space-y-3">
+            <div class="flex flex-1 overflow-hidden w-full h-full relative">
+                <aside class="hidden lg:flex flex-col w-64 bg-white border-r border-slate-200 overflow-y-auto shrink-0 shadow z-10">
+                    <nav class="p-4 space-y-1.5 pt-6">
+                        <p class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 px-2">Menú de ${App.state.userSession.rol}</p>
+                        ${allowedNavItems.map(item => `
+                            <button onclick="window.App.setTab('${item.id}')" class="w-full flex items-center p-3 rounded-xl transition-all ${App.state.activeTab === item.id ? 'bg-blue-50 text-blue-700 font-bold border border-blue-100 shadow-sm' : 'text-slate-600 hover:bg-slate-50 border border-transparent'}">
+                                <i data-lucide="${item.icon}" class="w-5 h-5 mr-3 ${App.state.activeTab === item.id ? 'text-blue-600' : 'text-slate-400'}"></i> ${item.label}
+                            </button>
+                        `).join('')}
+                    </nav>
+                </aside>
+                
+                <main class="flex-1 overflow-y-auto p-4 md:p-6 pb-28 lg:pb-8 bg-slate-50 print:bg-white print:p-0">
+                    <div class="max-w-6xl mx-auto">${mainContent}</div>
+                </main>
+            </div>
+
+            <!-- Bottom Navigation Móvil -->
+            <nav class="lg:hidden bg-white/95 backdrop-blur-md border-t border-slate-200 flex justify-start sm:justify-center overflow-x-auto hide-scroll pb-safe pt-2 px-2 z-50 w-full fixed bottom-0 left-0 shadow-[0_-10px_20px_-5px_rgba(0,0,0,0.08)]">
+                ${allowedNavItems.map(item => `
+                    <button onclick="window.App.setTab('${item.id}')" class="flex flex-col items-center justify-center p-2 min-w-[72px] sm:min-w-[80px] rounded-xl transition-colors ${App.state.activeTab === item.id ? 'text-blue-700 font-bold bg-blue-50/80 shadow-inner' : 'text-slate-500 hover:bg-slate-50'}">
+                        <i data-lucide="${item.icon}" class="w-5 h-5 mb-1 ${App.state.activeTab === item.id ? 'text-blue-600 scale-110' : ''}"></i>
+                        <span class="text-[10px] whitespace-nowrap">${item.label}</span>
+                    </button>
+                `).join('')}
+            </nav>
+
+            <!-- FAB Botón Flotante (Solo Admins y Editores) -->
+            ${App.canEdit() ? `
+            <div class="fixed bottom-20 lg:bottom-6 right-4 lg:right-6 z-[55] print:hidden flex flex-col items-end space-y-3">
                 ${App.state.isFabOpen ? `
                     <button onclick="window.App.state.isAddViajeOpen=true; window.App.state.editingViajeId=null; window.App.state.isFabOpen=false; window.App.render()" class="bg-blue-600 text-white p-3.5 rounded-full shadow-lg hover:bg-blue-700 flex items-center animate-fade-in transition-transform hover:scale-105"><span class="mr-3 font-bold text-xs bg-slate-800 px-2 py-1 rounded shadow">Nuevo Viaje</span><i data-lucide="ship" class="w-5 h-5"></i></button>
-                    <button onclick="window.App.state.isAddTransaccionOpen=true; window.App.state.isFabOpen=false; window.App.render()" class="bg-indigo-600 text-white p-3.5 rounded-full shadow-lg hover:bg-indigo-700 flex items-center animate-fade-in transition-transform hover:scale-105"><span class="mr-3 font-bold text-xs bg-slate-800 px-2 py-1 rounded shadow">Movimiento Caja</span><i data-lucide="arrow-right-left" class="w-5 h-5"></i></button>
-                    <button onclick="window.App.state.isAddClienteOpen=true; window.App.state.editingClienteId=null; window.App.state.isFabOpen=false; window.App.render()" class="bg-green-600 text-white p-3.5 rounded-full shadow-lg hover:bg-green-700 flex items-center animate-fade-in transition-transform hover:scale-105"><span class="mr-3 font-bold text-xs bg-slate-800 px-2 py-1 rounded shadow">Nuevo Cliente</span><i data-lucide="user-plus" class="w-5 h-5"></i></button>
+                    ${App.isAdmin() ? `<button onclick="window.App.state.isAddTransaccionOpen=true; window.App.state.isFabOpen=false; window.App.render()" class="bg-indigo-600 text-white p-3.5 rounded-full shadow-lg hover:bg-indigo-700 flex items-center animate-fade-in transition-transform hover:scale-105"><span class="mr-3 font-bold text-xs bg-slate-800 px-2 py-1 rounded shadow">Movimiento Caja</span><i data-lucide="arrow-right-left" class="w-5 h-5"></i></button>` : ''}
                 ` : ''}
                 <button onclick="window.App.state.isFabOpen = !window.App.state.isFabOpen; window.App.render()" class="bg-slate-900 text-white p-4 rounded-full shadow-2xl hover:bg-slate-800 active:scale-95 transition-transform">
                     <i data-lucide="${App.state.isFabOpen ? 'x' : 'plus'}" class="w-6 h-6 transition-transform ${App.state.isFabOpen ? 'rotate-90' : ''}"></i>
                 </button>
-            </div>
+            </div>` : ''}
         `;
 
         if (window.lucide) window.lucide.createIcons();
-
-        // Renderizado gráfico Avanzado (Protegido contra Crashes)
-        if(App.state.activeTab === 'dashboard') {
-            setTimeout(() => {
-                const ctx = document.getElementById('lineChart');
-                if(ctx && typeof Chart !== 'undefined') {
-                    const s = App.state;
-                    let dataToRender = App.getInformePeriodos();
-                    
-                    if (s.dashboardChartFiltro === 'Ultimos2') dataToRender = dataToRender.slice(-2);
-                    else if (s.dashboardChartFiltro === 'Ultimo') dataToRender = dataToRender.slice(-1);
-
-                    // Sanitización Anti-Crash
-                    if(!dataToRender || dataToRender.length === 0) dataToRender = [{ periodo: 'Sin Datos', ingresoProy: 0, utilProy: 0, utilReal: 0, gastos: 0 }];
-
-                    const labels = dataToRender.map(p => String(p.periodo || 'General').split(' ')[0]); 
-                    const ingresosBrutos = dataToRender.map(p => p.ingresoProy); 
-                    const utilidadesBrutas = dataToRender.map(p => p.utilProy);
-                    const utilidadesNetas = dataToRender.map(p => p.utilReal); 
-                    const costos = dataToRender.map(p => p.gastos); 
-
-                    if(window.dashChart) window.dashChart.destroy();
-                    window.dashChart = new Chart(ctx, {
-                        type: 'line',
-                        data: { 
-                            labels: labels, 
-                            datasets: [
-                                { label: 'Ingresos', data: ingresosBrutos, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }, 
-                                { label: 'Costos', data: costos, borderColor: '#ef4444', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, borderDash: [5, 5], pointRadius: 2 },
-                                { label: 'Util. Bruta', data: utilidadesBrutas, borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, pointRadius: 2 },
-                                { label: 'Util. Neta', data: utilidadesNetas, borderColor: '#0f766e', backgroundColor: 'rgba(15, 118, 110, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }
-                            ]
-                        },
-                        options: { 
-                            responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-                            plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 6, font: { weight: 'bold', size: window.innerWidth < 640 ? 10 : 12 } } }, tooltip: { callbacks: { label: function(context) { return context.dataset.label + ': ' + window.formatCOP(context.parsed.y); } } } }, 
-                            scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { weight: 'bold', size: 10 }, color: '#94a3b8', callback: function(value) { return '$' + (value / 1000000) + 'M'; } } }, x: { grid: { display: false }, ticks: { font: { weight: 'bold', size: 10 }, color: '#64748b' } } } 
-                        }
-                    });
-                }
-            }, 50); // El timeout previene que el Chart busque el Canvas antes de que se dibuje
-        }
     }
 };
 
-// Exponer de forma global al navegador
 window.App = App;
 
-// Inicialización del Sistema
+// Inicialización
 window.onload = () => {
-    App.applyTheme();
-    App.render();
+    window.App.applyTheme();
+    window.App.render();
     
-    // Conexión Diferida a Firebase (No bloquea la pantalla si falla la red)
+    setInterval(() => { window.App.autoSyncDaemon(); }, 45000);
+    window.addEventListener('online', window.App.autoSyncDaemon);
+
     if (window.isFirebaseReady) {
-        auth.signInAnonymously().then(() => {
-            auth.onAuthStateChanged((user) => {
-                if (user) {
-                    currentUser = user;
-                    const colecciones = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina'];
-                    
-                    colecciones.forEach(col => {
-                        db.collection('artifacts').doc(appIdStr).collection('public').doc('data').collection(col).onSnapshot((snapshot) => {
-                            const data = snapshot.docs.map(d => d.data());
-                            if (data.length > 0) { 
-                                App.state[col] = data; 
-                            } else if (App.state[col] !== SEED_DATA[col]) {
-                                App.state[col] = []; // Limpia la lista si en Firestore no hay nada
-                            }
-                            App.render(); 
-                        }, (error) => {
-                            console.error(`Error recibiendo datos de ${col}:`, error);
-                        });
-                    });
+        
+        const initAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
                 }
-            });
-        }).catch(err => console.error("Error Auth Firebase:", err));
+            } catch (err) {
+                console.error("Error Auth Firebase:", err);
+            }
+        };
+
+        initAuth();
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                window.activeFirebaseListeners.forEach(unsub => unsub()); 
+                window.activeFirebaseListeners = [];
+
+                const colecciones = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina', 'usuarios'];
+                
+                colecciones.forEach(col => {
+                    const colRef = collection(db, 'artifacts', appIdStr, 'public', 'data', col);
+                    const unsub = onSnapshot(colRef, (snapshot) => {
+                        const data = snapshot.docs.map(d => d.data());
+                        if (data.length > 0) { 
+                            window.App.state[col] = data; 
+                            window.hasLoadedFromCloud[col] = true;
+                        } else if (window.hasLoadedFromCloud[col]) {
+                            window.App.state[col] = []; 
+                        }
+                        window.App.render(); 
+                    });
+                    window.activeFirebaseListeners.push(unsub);
+                });
+            }
+        });
     }
 };
-
 </script>
 </body>
 </html>
