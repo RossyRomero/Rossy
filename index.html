@@ -111,7 +111,13 @@ const App = {
 
         // Configuración Global
         config: {
-            pdfIncludes: { balance: true, resultados: true, flujo: true, patrimonio: true, socios: true }
+            pdfIncludes: { balance: true, resultados: true, flujo: true, patrimonio: true, socios: true },
+            ui: {
+                isDark: false,
+                bgColor: '#f8fafc',
+                textColor: '#1e293b',
+                textSize: 'normal'
+            }
         },
 
         // Datos (Mock BD Cruzada con Archivos Reales y Extensión de Campos)
@@ -193,6 +199,76 @@ const App = {
     setDocTab: (tab) => { App.state.docTab = tab; App.render(); },
     setFilterVal: (key, val) => { App.state[key] = val; App.render(); },
     togglePdfConfig: (key) => { App.state.config.pdfIncludes[key] = !App.state.config.pdfIncludes[key]; App.render(); },
+    
+    // Configuración de Interfaz
+    setUIConfig: (key, val) => {
+        App.state.config.ui[key] = val;
+        App.applyTheme();
+        App.render();
+    },
+
+    applyTheme: () => {
+        const ui = App.state.config.ui;
+        const root = document.documentElement;
+        
+        // Ajuste de tamaño de fuente
+        if(ui.textSize === 'small') root.style.fontSize = '14px';
+        else if(ui.textSize === 'large') root.style.fontSize = '18px';
+        else root.style.fontSize = '16px';
+
+        // Inyección dinámica de CSS para Tema y Modo Oscuro
+        let styleTag = document.getElementById('dynamic-theme');
+        if(!styleTag) {
+            styleTag = document.createElement('style');
+            styleTag.id = 'dynamic-theme';
+            document.head.appendChild(styleTag);
+        }
+        
+        if(ui.isDark) {
+            styleTag.innerHTML = `
+                body, main, .bg-slate-50 { background-color: #0f172a !important; color: #f8fafc !important; }
+                .bg-white { background-color: #1e293b !important; border-color: #334155 !important; }
+                .text-slate-800, .text-slate-900 { color: #f8fafc !important; }
+                .text-slate-700, .text-slate-600 { color: #cbd5e1 !important; }
+                .text-slate-500, .text-slate-400 { color: #94a3b8 !important; }
+                .border-slate-100, .border-slate-200, .border-slate-300 { border-color: #334155 !important; }
+                header, select, input, textarea { background-color: #0f172a !important; color: #f8fafc !important; border-color: #334155 !important; }
+                table th { background-color: #0f172a !important; color: #f8fafc !important; }
+                .bg-blue-50, .bg-red-50, .bg-green-50, .bg-orange-50, .bg-indigo-50 { background-color: #1e293b !important; border-color: #334155 !important; }
+                .modal-box { background-color: #1e293b !important; color: #f8fafc !important; }
+                @media print { * { color: black !important; background: white !important; } }
+            `;
+        } else {
+            styleTag.innerHTML = `
+                body, main { background-color: ${ui.bgColor} !important; color: ${ui.textColor} !important; }
+            `;
+        }
+    },
+
+    exportToExcel: () => {
+        const viajes = App.state.viajes;
+        if(!viajes.length) { alert("No hay datos para exportar."); return; }
+        
+        const headers = ['ID', 'Fecha', 'Viaje/Documento', 'Periodo', 'Ruta', 'Ingreso Bruto', 'Gastos Operativos', 'Utilidad Bruta', 'Cartera Acumulada', 'Ingreso Recaudado (Caja)', 'Clientes', 'Productos', 'Pago Flete', 'Pago Cargue', 'Observaciones'];
+        
+        const rows = viajes.map(v => [
+            v.id, v.fecha, `"${v.viaje}"`, `"${v.periodo}"`, `"${v.ruta}"`,
+            v.ingreso, v.gastos, v.utilidadBruta, v.cartera, v.ingresoRecaudado,
+            `"${v.clientesAsociados || ''}"`, `"${v.productos || ''}"`, v.pagoFlete || 0, v.pagoCargue || 0, `"${v.observaciones || ''}"`
+        ]);
+        
+        // Agregar BOM para soporte UTF-8 en Excel
+        let csvContent = "\\uFEFF" + headers.join(",") + "\\n" + rows.map(e => e.join(",")).join("\\n");
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `DonSebe_Backup_${new Date().toISOString().split('T')[0]}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    },
     
     // Funciones del Numpad Nativo (Corregido)
     openNumpad: (targetField, label) => {
@@ -394,12 +470,52 @@ const App = {
      */
     renderConfig: () => {
         const c = App.state.config.pdfIncludes;
+        const ui = App.state.config.ui;
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
                 <div><h2 class="text-2xl font-bold flex items-center"><i data-lucide="settings" class="mr-2 text-blue-600 w-6 h-6"></i> Configuración del Sistema</h2><p class="text-sm text-slate-500">Ajustes de interfaz y preferencias de exportación</p></div>
             </div>
             
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
+                <h3 class="font-bold text-lg text-slate-800 mb-4 border-b pb-3 flex items-center"><i data-lucide="palette" class="w-5 h-5 mr-2 text-slate-400"></i> Personalización de Interfaz</h3>
+                <div class="space-y-4">
+                    <div class="flex items-center justify-between p-3 border rounded-xl hover:bg-slate-50 transition-colors">
+                        <div><p class="text-sm font-bold text-slate-700">Modo Oscuro Automático</p><p class="text-[10px] text-slate-400">Invierte paleta de colores para lectura nocturna.</p></div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                          <input type="checkbox" ${ui.isDark ? 'checked':''} onchange="App.setUIConfig('isDark', this.checked)" class="sr-only peer">
+                          <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="space-y-1">
+                            <label class="text-xs font-bold text-slate-500 uppercase">Fondo Global</label>
+                            <input type="color" value="${ui.bgColor}" onchange="App.setUIConfig('bgColor', this.value)" ${ui.isDark ? 'disabled opacity-50':''} class="w-full h-10 rounded cursor-pointer border border-slate-200 p-1">
+                        </div>
+                        <div class="space-y-1">
+                            <label class="text-xs font-bold text-slate-500 uppercase">Texto Base</label>
+                            <input type="color" value="${ui.textColor}" onchange="App.setUIConfig('textColor', this.value)" ${ui.isDark ? 'disabled opacity-50':''} class="w-full h-10 rounded cursor-pointer border border-slate-200 p-1">
+                        </div>
+                    </div>
+                    <div class="space-y-1 mt-2">
+                        <label class="text-xs font-bold text-slate-500 uppercase">Tamaño de Texto</label>
+                        <select onchange="App.setUIConfig('textSize', this.value)" class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none font-medium bg-white">
+                            <option value="small" ${ui.textSize==='small'?'selected':''}>Pequeño (14px)</option>
+                            <option value="normal" ${ui.textSize==='normal'?'selected':''}>Normal (16px)</option>
+                            <option value="large" ${ui.textSize==='large'?'selected':''}>Grande (18px)</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
+                <h3 class="font-bold text-lg text-slate-800 mb-4 border-b pb-3 flex items-center"><i data-lucide="hard-drive" class="w-5 h-5 mr-2 text-slate-400"></i> Copias de Seguridad y Datos</h3>
+                <p class="text-xs text-slate-500 mb-5">Exporta el registro tabular de ingresos y fletes en formato CSV compatible con Microsoft Excel y Google Sheets. Útil para contabilidad externa.</p>
+                <button onclick="App.exportToExcel()" class="w-full sm:w-auto bg-green-600 text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-700 transition shadow-sm">
+                    <i data-lucide="file-spreadsheet" class="w-5 h-5 mr-2"></i> Exportar BD a Excel (.csv)
+                </button>
+            </div>
+
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl">
                 <h3 class="font-bold text-lg text-slate-800 mb-2 border-b pb-3 flex items-center"><i data-lucide="file-text" class="w-5 h-5 mr-2 text-slate-400"></i> Opciones de Informe PDF (NIIF)</h3>
                 <p class="text-xs text-slate-500 mb-5">Activa o desactiva los submódulos que deseas anexar al final del "Informe Consolidado" al momento de presionar Exportar PDF. Esto te permite generar un documento más corto si solo requieres los datos operativos.</p>
@@ -1402,6 +1518,7 @@ const App = {
 
 // Inicialización del Sistema
 window.onload = () => {
+    App.applyTheme();
     App.render();
 };
 
