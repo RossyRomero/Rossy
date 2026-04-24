@@ -160,7 +160,7 @@ const App = {
     state: {
         activeTab: 'dashboard', niifTab: 'estado-situacion', docTab: 'escaner',
         uploadSuccess: false, isFabOpen: false, isSyncingData: false,
-        carteraViajeFiltro: 'Todos',
+        carteraViajeFiltro: 'Todos', dbFiltroPeriodo: 'Todos', dbFiltroRuta: 'Todos',
         alertMsg: null, // PARCHE: Estado para alertas customizadas
         
         selectedViaje: null, selectedCliente: null, selectedSocio: null,
@@ -262,7 +262,12 @@ const App = {
         let val = App.state.numpad.value;
         if(key === 'DEL') val = val.length > 1 ? val.slice(0, -1) : '0'; else if(key === 'CLEAR') val = '0'; 
         else { if(val.length > 12) return; if (val === '0') val = key === '000' ? '0' : key; else val += key; }
-        App.state.numpad.value = val; App.state.formTemp[App.state.numpad.targetForm][App.state.numpad.targetField] = parseInt(val, 10); App.render();
+        App.state.numpad.value = val; App.state.formTemp[App.state.numpad.targetForm][App.state.numpad.targetField] = parseInt(val, 10); 
+        
+        // ACTUALIZACIÓN PARCIAL: Solo modificar el texto en el DOM evita que toda la pantalla parpadee.
+        const displayEl = document.getElementById('numpad-display');
+        if (displayEl) displayEl.innerText = formatCOP(parseInt(val, 10));
+        else App.render();
     },
     closeNumpad: () => { App.state.numpad.isOpen = false; App.render(); },
 
@@ -761,27 +766,46 @@ const App = {
 
     renderBaseDatos: () => {
         const s = App.state;
+        const periodos = [...new Set(s.viajes.map(v => v.periodo))].filter(Boolean).sort();
+        const rutas = [...new Set(s.viajes.map(v => v.ruta))].filter(Boolean).sort();
+        
+        // Mantenimiento de Numeración ID con Filtrado Dinámico
+        let filteredViajes = [...s.viajes].sort((a, b) => b.id - a.id); 
+        if(s.dbFiltroPeriodo !== 'Todos') filteredViajes = filteredViajes.filter(v => v.periodo === s.dbFiltroPeriodo);
+        if(s.dbFiltroRuta !== 'Todos') filteredViajes = filteredViajes.filter(v => v.ruta === s.dbFiltroRuta);
+
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
-            <div class="flex justify-between items-center">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 md:gap-0">
                 <h2 class="text-2xl font-bold flex items-center text-slate-800"><i data-lucide="database" class="mr-2 text-blue-600"></i> Matriz de Datos en Crudo</h2>
-                <button onclick="App.exportToExcel()" class="bg-green-600 text-white px-3 py-2 rounded-lg text-xs font-bold hover:bg-green-700 shadow-sm flex items-center transition-colors"><i data-lucide="download" class="w-4 h-4 mr-2"></i> Excel (.csv)</button>
+                <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    <select onchange="window.App.setFilterVal('dbFiltroPeriodo', this.value)" class="text-xs p-2.5 border border-slate-300 rounded-lg outline-none font-bold text-slate-600 bg-white">
+                        <option value="Todos">Todos los Periodos</option>
+                        ${periodos.map(p => `<option value="${p}" ${s.dbFiltroPeriodo === p ? 'selected' : ''}>${p}</option>`).join('')}
+                    </select>
+                    <select onchange="window.App.setFilterVal('dbFiltroRuta', this.value)" class="text-xs p-2.5 border border-slate-300 rounded-lg outline-none font-bold text-slate-600 bg-white">
+                        <option value="Todos">Todas las Rutas</option>
+                        ${rutas.map(r => `<option value="${r}" ${s.dbFiltroRuta === r ? 'selected' : ''}>${r}</option>`).join('')}
+                    </select>
+                    <button onclick="App.exportToExcel()" class="bg-green-600 text-white px-4 py-2.5 rounded-lg text-xs font-bold hover:bg-green-700 shadow-sm flex items-center transition-colors"><i data-lucide="download" class="w-4 h-4 mr-2"></i> Excel (.csv)</button>
+                </div>
             </div>
             <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div class="w-full overflow-x-auto table-scroll max-h-[600px]">
                     <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
-                        <thead class="bg-slate-800 text-white sticky top-0 z-10"><tr><th class="p-2 border-r border-slate-700">ID</th><th class="p-2 border-r border-slate-700">Viaje</th><th class="p-2 border-r border-slate-700">Fecha</th><th class="p-2 border-r border-slate-700">Ingreso</th><th class="p-2 border-r border-slate-700">Gasto</th><th class="p-2 border-r border-slate-700">Util. Bruta</th><th class="p-2 border-r border-slate-700">Recaudado</th><th class="p-2">Cartera</th></tr></thead>
+                        <thead class="bg-slate-800 text-white sticky top-0 z-10"><tr><th class="p-3 border-r border-slate-700">ID Secuencia</th><th class="p-3 border-r border-slate-700">Viaje</th><th class="p-3 border-r border-slate-700">Fecha</th><th class="p-3 border-r border-slate-700 text-right">Ingreso</th><th class="p-3 border-r border-slate-700 text-right">Gasto</th><th class="p-3 border-r border-slate-700 text-right">Util. Bruta</th><th class="p-3 border-r border-slate-700 text-right">Recaudado</th><th class="p-3 text-right">Cartera</th></tr></thead>
                         <tbody>
-                            ${s.viajes.map(v => `
+                            ${filteredViajes.length === 0 ? '<tr><td colspan="8" class="p-8 text-center text-slate-500 text-sm font-medium">No hay registros que coincidan con estos filtros.</td></tr>' : ''}
+                            ${filteredViajes.map(v => `
                             <tr class="border-b hover:bg-slate-50 transition-colors">
-                                <td class="p-2 border-r text-slate-400">#${v.id}</td>
-                                <td class="p-2 border-r font-bold">${v.viaje}</td>
-                                <td class="p-2 border-r text-slate-500">${v.fecha}</td>
-                                <td class="p-2 border-r font-medium">${formatCOP(v.ingreso)}</td>
-                                <td class="p-2 border-r font-medium text-red-500">${formatCOP(v.gastos)}</td>
-                                <td class="p-2 border-r font-bold text-green-600">${formatCOP(v.utilidadBruta)}</td>
-                                <td class="p-2 border-r font-medium">${formatCOP(v.ingresoRecaudado)}</td>
-                                <td class="p-2 font-bold ${v.cartera > 0 ? 'text-orange-500' : 'text-slate-400'}">${formatCOP(v.cartera)}</td>
+                                <td class="p-3 border-r font-black text-slate-600">#${v.id}</td>
+                                <td class="p-3 border-r font-bold">${v.viaje}</td>
+                                <td class="p-3 border-r text-slate-500">${v.fecha}</td>
+                                <td class="p-3 border-r font-medium text-right">${formatCOP(v.ingreso)}</td>
+                                <td class="p-3 border-r font-medium text-red-500 text-right">${formatCOP(v.gastos)}</td>
+                                <td class="p-3 border-r font-bold text-green-600 text-right">${formatCOP(v.utilidadBruta)}</td>
+                                <td class="p-3 border-r font-medium text-right">${formatCOP(v.ingresoRecaudado)}</td>
+                                <td class="p-3 font-bold text-right ${v.cartera > 0 ? 'text-orange-500' : 'text-slate-400'}">${formatCOP(v.cartera)}</td>
                             </tr>`).join('')}
                         </tbody>
                     </table>
@@ -1360,7 +1384,7 @@ const App = {
                         <button onclick="window.App.handleNumpadClick('CLEAR')" class="text-slate-400 bg-slate-100 px-3 py-1.5 rounded-lg font-bold text-xs hover:bg-slate-200 transition-colors">LIMPIAR</button>
                     </div>
                     <div class="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-right mb-6">
-                        <p class="text-4xl font-black text-blue-900 tracking-tight break-all">${formattedVal}</p>
+                        <p id="numpad-display" class="text-4xl font-black text-blue-900 tracking-tight break-all">${formattedVal}</p>
                     </div>
                     <div class="grid grid-cols-3 gap-3 mb-4">
                         ${['1','2','3','4','5','6','7','8','9','000','0','DEL'].map(k => `
@@ -1656,32 +1680,28 @@ const App = {
                     const utilidadesNetas = dataToRender.map(p => p.utilReal); 
                     const costos = dataToRender.map(p => p.gastos); 
 
+                    // CORRECCIÓN GRÁFICA: Siempre destruir la instancia anterior para evitar fugas de memoria y errores de hover.
                     if(window.dashChart) {
-                        window.dashChart.data.labels = labels;
-                        window.dashChart.data.datasets[0].data = ingresosBrutos;
-                        window.dashChart.data.datasets[1].data = costos;
-                        window.dashChart.data.datasets[2].data = utilidadesBrutas;
-                        window.dashChart.data.datasets[3].data = utilidadesNetas;
-                        window.dashChart.update('none'); 
-                    } else {
-                        window.dashChart = new Chart(ctx, {
-                            type: 'line',
-                            data: { 
-                                labels: labels, 
-                                datasets: [
-                                    { label: 'Ingresos', data: ingresosBrutos, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }, 
-                                    { label: 'Costos', data: costos, borderColor: '#ef4444', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, borderDash: [5, 5], pointRadius: 2 },
-                                    { label: 'Util. Bruta', data: utilidadesBrutas, borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, pointRadius: 2 },
-                                    { label: 'Util. Neta', data: utilidadesNetas, borderColor: '#0f766e', backgroundColor: 'rgba(15, 118, 110, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }
-                                ]
-                            },
-                            options: { 
-                                responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
-                                plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 6, font: { weight: 'bold', size: window.innerWidth < 640 ? 10 : 12 } } }, tooltip: { callbacks: { label: function(context) { return context.dataset.label + ': ' + window.formatCOP(context.parsed.y); } } } }, 
-                                scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { weight: 'bold', size: 10 }, color: '#94a3b8', callback: function(value) { return '$' + (value / 1000000) + 'M'; } } }, x: { grid: { display: false }, ticks: { font: { weight: 'bold', size: 10 }, color: '#64748b' } } } 
-                            }
-                        });
+                        window.dashChart.destroy(); 
                     }
+                    
+                    window.dashChart = new Chart(ctx, {
+                        type: 'line',
+                        data: { 
+                            labels: labels, 
+                            datasets: [
+                                { label: 'Ingresos', data: ingresosBrutos, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }, 
+                                { label: 'Costos', data: costos, borderColor: '#ef4444', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, borderDash: [5, 5], pointRadius: 2 },
+                                { label: 'Util. Bruta', data: utilidadesBrutas, borderColor: '#10b981', backgroundColor: 'transparent', tension: 0.4, borderWidth: 2, pointRadius: 2 },
+                                { label: 'Util. Neta', data: utilidadesNetas, borderColor: '#0f766e', backgroundColor: 'rgba(15, 118, 110, 0.1)', tension: 0.4, borderWidth: 3, fill: true, pointRadius: 3 }
+                            ]
+                        },
+                        options: { 
+                            responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+                            plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 6, font: { weight: 'bold', size: window.innerWidth < 640 ? 10 : 12 } } }, tooltip: { callbacks: { label: function(context) { return context.dataset.label + ': ' + window.formatCOP(context.parsed.y); } } } }, 
+                            scales: { y: { beginAtZero: true, grid: { color: '#f1f5f9' }, ticks: { font: { weight: 'bold', size: 10 }, color: '#94a3b8', callback: function(value) { return '$' + (value / 1000000) + 'M'; } } }, x: { grid: { display: false }, ticks: { font: { weight: 'bold', size: 10 }, color: '#64748b' } } } 
+                        }
+                    });
                 } 
             });
         }
