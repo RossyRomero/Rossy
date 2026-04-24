@@ -691,6 +691,100 @@ const App = {
             periodosInfo = s.informePeriodos.filter(p => p.periodo === s.informePdfFiltro);
         }
 
+        const contentBalance = `
+            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Situación Financiera (Balance)</h3></div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
+                <div><h4 class="font-black mb-3 bg-slate-100 border border-slate-200 p-2 sm:p-3 rounded-lg text-slate-800 text-xs sm:text-sm">ACTIVOS</h4>
+                    <div class="pl-2"><span class="text-xs font-bold text-slate-400">Activo Corriente</span>
+                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Caja y Bancos (Efectivo)</span><span class="font-medium">${formatCOP(t.utilidadNeta - t.carteraTotal)}</span></div>
+                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Cuentas por Cobrar (Clientes)</span><span class="font-medium">${formatCOP(t.carteraTotal)}</span></div></div>
+                    <div class="pl-2 mt-4"><span class="text-xs font-bold text-slate-400">Activo No Corriente</span>
+                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Propiedad, Planta y Equipo (Barco)</span><span class="font-medium">${formatCOP(t.inversionTotal)}</span></div></div>
+                    <div class="flex justify-between font-black text-base sm:text-lg pt-3 mt-2 border-t-2 border-slate-800"><span>TOTAL ACTIVOS</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div>
+                </div>
+                <div><h4 class="font-black mb-3 bg-slate-100 border border-slate-200 p-2 sm:p-3 rounded-lg text-slate-800 text-xs sm:text-sm">PASIVO Y PATRIMONIO</h4>
+                    <div class="pl-2"><span class="text-xs font-bold text-slate-400">Pasivos</span>
+                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Cuentas por Pagar (Mantenimiento)</span><span class="font-medium">${formatCOP(81900472)}</span></div></div>
+                    <div class="pl-2 mt-4"><span class="text-xs font-bold text-slate-400">Patrimonio Neto</span>
+                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Capital Social Suscrito</span><span class="font-medium">${formatCOP(t.inversionTotal)}</span></div>
+                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Utilidades del Ejercicio</span><span class="font-medium text-green-600">${formatCOP(t.utilidadNeta - 81900472)}</span></div></div>
+                    <div class="flex justify-between font-black text-base sm:text-lg text-blue-700 pt-3 mt-2 border-t-2 border-slate-800"><span>TOTAL PASIVO + PAT.</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div>
+                </div>
+            </div>`;
+
+        const contentResultados = `
+            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Resultados Integrales (P&G)</h3></div>
+            <div class="space-y-3 sm:space-y-4 text-xs sm:text-sm max-w-3xl mx-auto border-2 border-slate-100 p-6 rounded-2xl bg-white shadow-sm">
+                <div class="flex justify-between items-center font-bold bg-slate-50 border border-slate-200 p-2 sm:p-3 rounded-lg"><span class="text-sm sm:text-base text-slate-800">Ingresos de Actividades Ordinarias (Fletes)</span><span class="text-base sm:text-lg">${formatCOP(t.ingresoTotal)}</span></div>
+                <div class="flex justify-between items-center px-2 sm:px-3 py-1"><span>(-) Costos Directos de Operación (Combustible, Insumos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.7)}</span></div>
+                <div class="flex justify-between items-center px-2 sm:px-3 py-1 border-b border-slate-200 pb-2 sm:pb-3"><span>(-) Gastos de Personal (Nómina, Viáticos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.3)}</span></div>
+                <div class="flex justify-between items-center px-2 sm:px-3 py-2 font-bold bg-green-50/50 rounded-lg"><span class="text-slate-800">Utilidad Bruta Operacional</span><span class="text-green-700">${formatCOP(t.utilidadBruta)}</span></div>
+                <div class="flex justify-between items-center px-2 sm:px-3 py-1 mt-2"><span>(-) Depreciación y Amortización (Estimado NIIF)</span><span class="text-red-500 font-medium">-${formatCOP(0)}</span></div>
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center font-black text-xl sm:text-2xl text-green-600 pt-4 sm:pt-6 mt-3 sm:mt-4 border-t-2 border-slate-800"><span class="uppercase tracking-tight text-sm sm:text-xl">UTILIDAD NETA DEL PERIODO</span><span class="mt-1 sm:mt-0">${formatCOP(t.utilidadNeta)}</span></div>
+            </div>`;
+
+        const contentFlujo = `
+            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Flujo de Efectivo</h3><p class="text-xs text-slate-500">Método Directo de Caja</p></div>
+            <div class="max-w-2xl mx-auto space-y-4">
+                <div class="border rounded-xl p-4 bg-white shadow-sm">
+                    <h4 class="font-black text-blue-800 border-b pb-2 mb-2 text-sm">Actividades de Operación</h4>
+                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Recaudos Efectivos de Clientes</span><span class="font-bold text-green-600">+ ${formatCOP(t.ingresoRecaudado)}</span></div>
+                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Pagos a Proveedores y Gastos</span><span class="font-bold text-red-500">- ${formatCOP(t.gastoTotal)}</span></div>
+                    <div class="flex justify-between text-sm py-1 border-t mt-2 pt-2 font-bold bg-slate-50 p-2"><span>Flujo Neto de Operación</span><span>${formatCOP(t.ingresoRecaudado - t.gastoTotal)}</span></div>
+                </div>
+                <div class="border rounded-xl p-4 bg-white shadow-sm">
+                    <h4 class="font-black text-indigo-800 border-b pb-2 mb-2 text-sm">Actividades de Inversión / Financiación</h4>
+                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Aportes de Capital (Socios)</span><span class="font-bold text-green-600">+ ${formatCOP(t.inversionTotal)}</span></div>
+                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Pago de Mantenimientos Extra</span><span class="font-bold text-red-500">- ${formatCOP(81900472)}</span></div>
+                    <div class="flex justify-between text-sm py-1 border-t mt-2 pt-2 font-bold bg-slate-50 p-2"><span>Flujo Neto de Financiación</span><span>${formatCOP(t.inversionTotal - 81900472)}</span></div>
+                </div>
+                <div class="bg-slate-800 text-white rounded-xl p-4 flex justify-between font-black text-lg">
+                    <span>EFECTIVO FINAL EN CAJA:</span>
+                    <span>${formatCOP((t.ingresoRecaudado - t.gastoTotal) + (t.inversionTotal - 81900472))}</span>
+                </div>
+            </div>`;
+
+        const contentPatrimonio = `
+            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Cambios en el Patrimonio</h3></div>
+            <div class="w-full overflow-x-auto table-scroll">
+                <table class="w-full text-left text-xs sm:text-sm border-collapse min-w-[700px] border">
+                    <thead>
+                        <tr class="bg-slate-100 text-slate-700 border-b">
+                            <th class="p-3 font-bold border-r">Detalle</th>
+                            <th class="p-3 font-bold text-right border-r">Capital Social</th>
+                            <th class="p-3 font-bold text-right border-r">Utilidades Retenidas</th>
+                            <th class="p-3 font-bold text-right">Total Patrimonio</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr class="border-b">
+                            <td class="p-3 font-medium border-r">Saldos Iniciales</td>
+                            <td class="p-3 text-right border-r">${formatCOP(t.inversionTotal)}</td>
+                            <td class="p-3 text-right border-r">${formatCOP(0)}</td>
+                            <td class="p-3 text-right font-bold">${formatCOP(t.inversionTotal)}</td>
+                        </tr>
+                        <tr class="border-b bg-green-50/30">
+                            <td class="p-3 font-medium border-r">+ Utilidad Integral del Periodo</td>
+                            <td class="p-3 text-right border-r">-</td>
+                            <td class="p-3 text-right border-r text-green-600">+ ${formatCOP(t.utilidadNeta)}</td>
+                            <td class="p-3 text-right font-bold text-green-600">+ ${formatCOP(t.utilidadNeta)}</td>
+                        </tr>
+                        <tr class="border-b bg-red-50/30">
+                            <td class="p-3 font-medium border-r">- Cruce Mantenimiento Socio PRI</td>
+                            <td class="p-3 text-right border-r">-</td>
+                            <td class="p-3 text-right border-r text-red-500">- ${formatCOP(81900472)}</td>
+                            <td class="p-3 text-right font-bold text-red-500">- ${formatCOP(81900472)}</td>
+                        </tr>
+                        <tr class="bg-slate-800 text-white font-black">
+                            <td class="p-3 border-r">SALDO FINAL PATRIMONIO</td>
+                            <td class="p-3 text-right border-r">${formatCOP(t.inversionTotal)}</td>
+                            <td class="p-3 text-right border-r">${formatCOP(t.utilidadNeta - 81900472)}</td>
+                            <td class="p-3 text-right text-lg">${formatCOP(t.inversionTotal + (t.utilidadNeta - 81900472))}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>`;
+
         if(s.niifTab === 'informe-consolidado') {
             content = `
             <div class="print:block" id="pdf-content">
@@ -776,102 +870,33 @@ const App = {
                         <p class="text-[10px] sm:text-xs text-blue-800 mt-3 italic print:text-slate-600">Conclusión: El socio no puede realizar retiros, ya que el mantenimiento absorbió sus utilidades. Saldo negativo cubierto con utilidades operativas futuras.</p>
                     </div>
                 </div>
-            </div>`;
-        } 
-        else if(s.niifTab === 'estado-situacion') {
-            content = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Situación Financiera (Balance)</h3></div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
-                <div><h4 class="font-black mb-3 bg-slate-100 border border-slate-200 p-2 sm:p-3 rounded-lg text-slate-800 text-xs sm:text-sm">ACTIVOS</h4>
-                    <div class="pl-2"><span class="text-xs font-bold text-slate-400">Activo Corriente</span>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Caja y Bancos (Efectivo)</span><span class="font-medium">${formatCOP(t.utilidadNeta - t.carteraTotal)}</span></div>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Cuentas por Cobrar (Clientes)</span><span class="font-medium">${formatCOP(t.carteraTotal)}</span></div></div>
-                    <div class="pl-2 mt-4"><span class="text-xs font-bold text-slate-400">Activo No Corriente</span>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Propiedad, Planta y Equipo (Barco)</span><span class="font-medium">${formatCOP(t.inversionTotal)}</span></div></div>
-                    <div class="flex justify-between font-black text-base sm:text-lg pt-3 mt-2 border-t-2 border-slate-800"><span>TOTAL ACTIVOS</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div>
+
+                <!-- SECCIÓN OCULTA EN PANTALLA, VISIBLE EN IMPRESIÓN (PDF) -->
+                <div class="hidden print:block">
+                    <div class="print-page-break mt-10 pt-10 border-t border-slate-200">
+                        ${contentBalance}
+                    </div>
+                    <div class="print-page-break mt-10 pt-10 border-t border-slate-200">
+                        ${contentResultados}
+                    </div>
+                    <div class="print-page-break mt-10 pt-10 border-t border-slate-200">
+                        ${contentFlujo}
+                    </div>
+                    <div class="print-page-break mt-10 pt-10 border-t border-slate-200">
+                        ${contentPatrimonio}
+                    </div>
                 </div>
-                <div><h4 class="font-black mb-3 bg-slate-100 border border-slate-200 p-2 sm:p-3 rounded-lg text-slate-800 text-xs sm:text-sm">PASIVO Y PATRIMONIO</h4>
-                    <div class="pl-2"><span class="text-xs font-bold text-slate-400">Pasivos</span>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Cuentas por Pagar (Mantenimiento)</span><span class="font-medium">${formatCOP(81900472)}</span></div></div>
-                    <div class="pl-2 mt-4"><span class="text-xs font-bold text-slate-400">Patrimonio Neto</span>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Capital Social Suscrito</span><span class="font-medium">${formatCOP(t.inversionTotal)}</span></div>
-                    <div class="flex justify-between text-xs sm:text-sm py-2 border-b border-slate-100"><span>Utilidades del Ejercicio</span><span class="font-medium text-green-600">${formatCOP(t.utilidadNeta - 81900472)}</span></div></div>
-                    <div class="flex justify-between font-black text-base sm:text-lg text-blue-700 pt-3 mt-2 border-t-2 border-slate-800"><span>TOTAL PASIVO + PAT.</span><span>${formatCOP(t.inversionTotal + t.utilidadNeta)}</span></div>
-                </div>
+                <!-- FIN SECCIÓN IMPRESIÓN EXTRA -->
+
             </div>`;
+        } else if(s.niifTab === 'estado-situacion') {
+            content = contentBalance;
         } else if (s.niifTab === 'resultados') {
-            content = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Resultados Integrales (P&G)</h3></div>
-            <div class="space-y-3 sm:space-y-4 text-xs sm:text-sm max-w-3xl mx-auto border-2 border-slate-100 p-6 rounded-2xl bg-white shadow-sm">
-                <div class="flex justify-between items-center font-bold bg-slate-50 border border-slate-200 p-2 sm:p-3 rounded-lg"><span class="text-sm sm:text-base text-slate-800">Ingresos de Actividades Ordinarias (Fletes)</span><span class="text-base sm:text-lg">${formatCOP(t.ingresoTotal)}</span></div>
-                <div class="flex justify-between items-center px-2 sm:px-3 py-1"><span>(-) Costos Directos de Operación (Combustible, Insumos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.7)}</span></div>
-                <div class="flex justify-between items-center px-2 sm:px-3 py-1 border-b border-slate-200 pb-2 sm:pb-3"><span>(-) Gastos de Personal (Nómina, Viáticos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.3)}</span></div>
-                <div class="flex justify-between items-center px-2 sm:px-3 py-2 font-bold bg-green-50/50 rounded-lg"><span class="text-slate-800">Utilidad Bruta Operacional</span><span class="text-green-700">${formatCOP(t.utilidadBruta)}</span></div>
-                <div class="flex justify-between items-center px-2 sm:px-3 py-1 mt-2"><span>(-) Depreciación y Amortización (Estimado NIIF)</span><span class="text-red-500 font-medium">-${formatCOP(0)}</span></div>
-                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center font-black text-xl sm:text-2xl text-green-600 pt-4 sm:pt-6 mt-3 sm:mt-4 border-t-2 border-slate-800"><span class="uppercase tracking-tight text-sm sm:text-xl">UTILIDAD NETA DEL PERIODO</span><span class="mt-1 sm:mt-0">${formatCOP(t.utilidadNeta)}</span></div>
-            </div>`;
+            content = contentResultados;
         } else if (s.niifTab === 'flujo-efectivo') {
-            content = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Flujo de Efectivo</h3><p class="text-xs text-slate-500">Método Directo de Caja</p></div>
-            <div class="max-w-2xl mx-auto space-y-4">
-                <div class="border rounded-xl p-4 bg-white shadow-sm">
-                    <h4 class="font-black text-blue-800 border-b pb-2 mb-2 text-sm">Actividades de Operación</h4>
-                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Recaudos Efectivos de Clientes</span><span class="font-bold text-green-600">+ ${formatCOP(t.ingresoRecaudado)}</span></div>
-                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Pagos a Proveedores y Gastos</span><span class="font-bold text-red-500">- ${formatCOP(t.gastoTotal)}</span></div>
-                    <div class="flex justify-between text-sm py-1 border-t mt-2 pt-2 font-bold bg-slate-50 p-2"><span>Flujo Neto de Operación</span><span>${formatCOP(t.ingresoRecaudado - t.gastoTotal)}</span></div>
-                </div>
-                <div class="border rounded-xl p-4 bg-white shadow-sm">
-                    <h4 class="font-black text-indigo-800 border-b pb-2 mb-2 text-sm">Actividades de Inversión / Financiación</h4>
-                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Aportes de Capital (Socios)</span><span class="font-bold text-green-600">+ ${formatCOP(t.inversionTotal)}</span></div>
-                    <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Pago de Mantenimientos Extra</span><span class="font-bold text-red-500">- ${formatCOP(81900472)}</span></div>
-                    <div class="flex justify-between text-sm py-1 border-t mt-2 pt-2 font-bold bg-slate-50 p-2"><span>Flujo Neto de Financiación</span><span>${formatCOP(t.inversionTotal - 81900472)}</span></div>
-                </div>
-                <div class="bg-slate-800 text-white rounded-xl p-4 flex justify-between font-black text-lg">
-                    <span>EFECTIVO FINAL EN CAJA:</span>
-                    <span>${formatCOP((t.ingresoRecaudado - t.gastoTotal) + (t.inversionTotal - 81900472))}</span>
-                </div>
-            </div>`;
+            content = contentFlujo;
         } else if (s.niifTab === 'patrimonio') {
-            content = `
-            <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Cambios en el Patrimonio</h3></div>
-            <div class="w-full overflow-x-auto table-scroll">
-                <table class="w-full text-left text-xs sm:text-sm border-collapse min-w-[700px] border">
-                    <thead>
-                        <tr class="bg-slate-100 text-slate-700 border-b">
-                            <th class="p-3 font-bold border-r">Detalle</th>
-                            <th class="p-3 font-bold text-right border-r">Capital Social</th>
-                            <th class="p-3 font-bold text-right border-r">Utilidades Retenidas</th>
-                            <th class="p-3 font-bold text-right">Total Patrimonio</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr class="border-b">
-                            <td class="p-3 font-medium border-r">Saldos Iniciales</td>
-                            <td class="p-3 text-right border-r">${formatCOP(t.inversionTotal)}</td>
-                            <td class="p-3 text-right border-r">${formatCOP(0)}</td>
-                            <td class="p-3 text-right font-bold">${formatCOP(t.inversionTotal)}</td>
-                        </tr>
-                        <tr class="border-b bg-green-50/30">
-                            <td class="p-3 font-medium border-r">+ Utilidad Integral del Periodo</td>
-                            <td class="p-3 text-right border-r">-</td>
-                            <td class="p-3 text-right border-r text-green-600">+ ${formatCOP(t.utilidadNeta)}</td>
-                            <td class="p-3 text-right font-bold text-green-600">+ ${formatCOP(t.utilidadNeta)}</td>
-                        </tr>
-                        <tr class="border-b bg-red-50/30">
-                            <td class="p-3 font-medium border-r">- Cruce Mantenimiento Socio PRI</td>
-                            <td class="p-3 text-right border-r">-</td>
-                            <td class="p-3 text-right border-r text-red-500">- ${formatCOP(81900472)}</td>
-                            <td class="p-3 text-right font-bold text-red-500">- ${formatCOP(81900472)}</td>
-                        </tr>
-                        <tr class="bg-slate-800 text-white font-black">
-                            <td class="p-3 border-r">SALDO FINAL PATRIMONIO</td>
-                            <td class="p-3 text-right border-r">${formatCOP(t.inversionTotal)}</td>
-                            <td class="p-3 text-right border-r">${formatCOP(t.utilidadNeta - 81900472)}</td>
-                            <td class="p-3 text-right text-lg">${formatCOP(t.inversionTotal + (t.utilidadNeta - 81900472))}</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>`;
+            content = contentPatrimonio;
         }
 
         const tabsNIIF = [
