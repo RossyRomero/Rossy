@@ -72,22 +72,29 @@ let db = null;
 window.isFirebaseReady = false;
 let currentUser = null;
 window.activeFirebaseListeners = [];
-window.hasLoadedFromCloud = {}; // PARCHE: Bóveda protectora para evitar que la UI quede en blanco
+window.hasLoadedFromCloud = {};
 
 const appIdStr = typeof __app_id !== 'undefined' ? __app_id : "don-sebe-erp";
 
 // Inicialización Segura Dinámica con Motor Offline Nativo (IndexedDB)
+let firebaseConfig = fallbackConfig;
 try {
-    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
+    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+        firebaseConfig = JSON.parse(__firebase_config);
+    }
+} catch (e) {
+    console.warn("JSON Parse Fallback para Configuración:", e);
+}
+
+try {
     const app = initializeApp(firebaseConfig);
     auth = getAuth(app);
     
-    // HABILITAR PERSISTENCIA LOCAL NATIVA (Soporte Offline Total y Automático)
     try {
         db = initializeFirestore(app, { localCache: persistentLocalCache() });
         console.log("📦 Motor Offline de Firebase activado (IndexedDB).");
     } catch (e) {
-        db = getFirestore(app); // Fallback de seguridad
+        db = getFirestore(app); 
     }
     
     window.isFirebaseReady = true;
@@ -102,20 +109,17 @@ try {
  */
 window.dbHelper = {
     save: async (colName, id, data) => {
-        // 1. Actualización Optimista Inmediata (UI Instantánea)
         const idx = App.state[colName].findIndex(x => x.id === id);
         if(idx !== -1) App.state[colName][idx] = { ...App.state[colName][idx], ...data };
         else App.state[colName].push({ id, ...data });
         window.App.render();
 
-        // 2. Delegación a Firebase (Se encola solo en el disco si no hay internet)
         if (window.isFirebaseReady && currentUser) {
             setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()), data, { merge: true })
                 .catch(e => console.warn("Guardado encolado para próxima conexión...", e));
         }
     },
     saveBatch: async (operations) => {
-        // Actualización Optimista Múltiple
         operations.forEach(op => {
             const idx = App.state[op.colName].findIndex(x => x.id === op.id);
             if(idx !== -1) App.state[op.colName][idx] = { ...App.state[op.colName][idx], ...op.data };
@@ -123,7 +127,6 @@ window.dbHelper = {
         });
         window.App.render();
 
-        // Delegación Atómica a Firebase
         if (window.isFirebaseReady && currentUser) {
             const batch = writeBatch(db);
             operations.forEach(op => {
@@ -150,7 +153,7 @@ window.parseCOP = (valueStr) => Number(valueStr.replace(/[^0-9.-]+/g,""));
 
 /**
  * ==========================================
- * 3. STATE MANAGEMENT Y ARQUITECTURA (DB LIMPIA)
+ * 3. STATE MANAGEMENT Y ARQUITECTURA
  * ==========================================
  */
 const App = {
@@ -158,6 +161,7 @@ const App = {
         activeTab: 'dashboard', niifTab: 'estado-situacion', docTab: 'escaner',
         uploadSuccess: false, isFabOpen: false, isSyncingData: false,
         carteraViajeFiltro: 'Todos',
+        alertMsg: null, // PARCHE: Estado para alertas customizadas
         
         selectedViaje: null, selectedCliente: null, selectedSocio: null,
         isAddViajeOpen: false, isAddClienteOpen: false, isAddNominaOpen: false, isAddSocioOpen: false, isTransferOpen: false, isAddCuentaOpen: false, isAddTransaccionOpen: false,
@@ -181,17 +185,8 @@ const App = {
             ui: { isDark: false, bgColor: '#f8fafc', textColor: '#1e293b', textSize: 'normal' }
         },
 
-        // MATRIZ DESVINCULADA: Arrays completamente limpios para hidratación desde Firebase
-        cuentas: [], 
-        transacciones: [], 
-        viajes: [], 
-        carteraViajes: [], 
-        carteraClientes: [], 
-        clientesDir: [], 
-        socios: [], 
-        pagosNomina: [],
+        cuentas: [], transacciones: [], viajes: [], carteraViajes: [], carteraClientes: [], clientesDir: [], socios: [], pagosNomina: [],
         
-        // Tabla tarifaria base 2026 (Esto es configuración, no datos de BD, se mantiene fijo)
         nominaBase: [
             { id: 1, cargo: 'Capitán', valorDia: 190000, diasDefault: 5 }, { id: 2, cargo: 'Marinero 1', valorDia: 80000, diasDefault: 5 },
             { id: 3, cargo: 'Marinero 2', valorDia: 80000, diasDefault: 5 }, { id: 4, cargo: 'Marinero 3', valorDia: 80000, diasDefault: 5 },
@@ -214,6 +209,10 @@ const App = {
         { id: 'config', label: 'Ajustes', icon: 'settings' }
     ],
 
+    // MÓDULO DE ALERTAS CUSTOMIZADAS (Remplaza a los 'alert' nativos prohibidos)
+    showAlert: (msg) => { App.state.alertMsg = msg; App.render(); },
+    closeAlert: () => { App.state.alertMsg = null; App.render(); },
+
     setTab: (tab) => { App.state.activeTab = tab; App.state.isFabOpen = false; App.render(); },
     setNiifTab: (tab) => { App.state.niifTab = tab; App.render(); },
     setDocTab: (tab) => { App.state.docTab = tab; App.render(); },
@@ -233,7 +232,7 @@ const App = {
         }
     },
     exportToExcel: () => {
-        const viajes = App.state.viajes; if(!viajes.length) { alert("No hay datos para exportar."); return; }
+        const viajes = App.state.viajes; if(!viajes.length) { App.showAlert("No hay datos para exportar."); return; }
         const headers = ['ID', 'Fecha', 'Viaje/Documento', 'Periodo', 'Ruta', 'Ingreso Bruto', 'Gastos Operativos', 'Utilidad Bruta', 'Cartera Acumulada', 'Ingreso Recaudado (Caja)', 'Clientes', 'Productos', 'Pago Flete', 'Pago Cargue', 'Observaciones'];
         const rows = viajes.map(v => [ v.id, v.fecha, `"${v.viaje}"`, `"${v.periodo || ''}"`, `"${v.ruta}"`, v.ingreso, v.gastos, v.utilidadBruta, v.cartera, v.ingresoRecaudado, `"${v.clientesAsociados || ''}"`, `"${v.productos || ''}"`, v.pagoFlete || 0, v.pagoCargue || 0, `"${v.observaciones || ''}"` ]);
         let csvContent = "\uFEFF" + headers.join(",") + "\n" + rows.map(e => e.join(",")).join("\n");
@@ -243,7 +242,6 @@ const App = {
     },
     
     openNumpad: (targetField, label, formTarget = 'viaje') => { 
-        // PARCHE: Evitar pérdida de datos. Guardamos los valores del formulario actual antes de abrir el teclado
         const formEl = document.querySelector('form');
         if (formEl && App.state.formTemp[formTarget]) {
             Array.from(formEl.elements).forEach(el => {
@@ -280,9 +278,8 @@ const App = {
     openAddCuenta: () => { App.state.editingCuentaId = null; App.state.formTemp.cuenta = { nombre: '', tipo: 'banco', saldoInicial: 0, numero: '' }; App.state.isAddCuentaOpen = true; App.render(); },
     editCuenta: (id) => { const c = App.state.cuentas.find(x => x.id === id); if(!c) return; App.state.editingCuentaId = id; App.state.formTemp.cuenta = { ...c }; App.state.isAddCuentaOpen = true; App.render(); },
     deleteCuenta: async (id, btnElement) => {
-        // CORRECCIÓN: Bloqueo de eliminación para cuentas con fondos (Fuga de dinero evitada)
         const saldo = App.getSaldoCuenta(id);
-        if (saldo > 0) { alert(`Seguridad Financiera: No puede eliminar una cuenta con saldo a favor (${formatCOP(saldo)}). Transfiera los fondos antes de borrarla.`); return; }
+        if (saldo > 0) { App.showAlert(`Seguridad Financiera: No puede eliminar una cuenta con saldo a favor (${formatCOP(saldo)}). Transfiera los fondos antes de borrarla.`); return; }
 
         if(btnElement.innerText === 'Eliminar Cuenta') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
         else { await window.dbHelper.remove('cuentas', id); App.closeModals(); }
@@ -298,12 +295,11 @@ const App = {
     openAddTransaccion: () => { App.state.formTemp.transaccion = { tipo: 'ingreso', monto: 0, fecha: new Date().toISOString().split('T')[0], concepto: '', cuentaId: '', cuentaDestinoId: '' }; App.state.isAddTransaccionOpen = true; App.render(); },
     submitTransaccionManual: async (e) => {
         e.preventDefault(); const f = e.target; const t = App.state.formTemp.transaccion; const cuentaOrigen = parseInt(f.cuentaId.value);
-        if (t.monto <= 0 || !cuentaOrigen) { alert("Datos inválidos."); return; }
+        if (t.monto <= 0 || !cuentaOrigen) { App.showAlert("Datos inválidos."); return; }
 
         if (t.tipo === 'transferencia') {
-            const cuentaDest = parseInt(f.cuentaDestinoId.value); if(cuentaOrigen === cuentaDest || !cuentaDest) { alert("Cuentas deben ser distintas."); return; }
+            const cuentaDest = parseInt(f.cuentaDestinoId.value); if(cuentaOrigen === cuentaDest || !cuentaDest) { App.showAlert("Cuentas deben ser distintas."); return; }
             const idRet = Date.now();
-            // CORRECCIÓN ATÓMICA: Traspasos son una sola operación (Batch)
             const batchOps = [
                 { colName: 'transacciones', id: idRet, data: { id: idRet, cuentaId: cuentaOrigen, tipo: 'egreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia a #${cuentaDest} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null } },
                 { colName: 'transacciones', id: idRet + 1, data: { id: idRet + 1, cuentaId: cuentaDest, tipo: 'ingreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia de #${cuentaOrigen} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null } }
@@ -327,7 +323,7 @@ const App = {
         const totalEgresos = formD.gastos + (formD.pagoFlete || 0) + (formD.pagoCargue || 0); const recaudoReal = formD.ingreso - formD.cartera;
         const ctaIngreso = parseInt(f.cuentaIngresoId?.value); const ctaEgreso = parseInt(f.cuentaEgresoId?.value);
 
-        if (!App.state.editingViajeId) { if ((recaudoReal > 0 && !ctaIngreso) || (totalEgresos > 0 && !ctaEgreso)) { alert("Debe seleccionar las cajas/bancos para el movimiento de dinero."); return; } }
+        if (!App.state.editingViajeId) { if ((recaudoReal > 0 && !ctaIngreso) || (totalEgresos > 0 && !ctaEgreso)) { App.showAlert("Debe seleccionar las cajas/bancos para el movimiento de dinero."); return; } }
 
         let periodoCalc = 'Nuevo Periodo';
         if (f.fecha.value) {
@@ -340,14 +336,12 @@ const App = {
         const newId = App.state.editingViajeId || Date.now();
         const fullData = { id: newId, viaje: App.state.editingViajeId ? App.state.viajes.find(v=>v.id===newId).viaje : `Viaje #${App.state.viajes.length + 1}`, periodo: App.state.editingViajeId ? App.state.viajes.find(v=>v.id===newId).periodo : periodoCalc, ...viajeData };
 
-        // CORRECCIÓN ATÓMICA Y AUTOMATIZACIÓN DE CARTERA
         const batchOps = [{ colName: 'viajes', id: newId, data: fullData }];
 
         if (!App.state.editingViajeId) {
             if (recaudoReal > 0 && ctaIngreso) batchOps.push({ colName: 'transacciones', id: Date.now() + 1, data: { id: Date.now() + 1, cuentaId: ctaIngreso, tipo: 'ingreso', monto: recaudoReal, fecha: f.fecha.value, concepto: `Recaudo Fletes - ${fullData.viaje}`, modulo: 'Viajes', referencia: newId } });
             if (totalEgresos > 0 && ctaEgreso) batchOps.push({ colName: 'transacciones', id: Date.now() + 2, data: { id: Date.now() + 2, cuentaId: ctaEgreso, tipo: 'egreso', monto: totalEgresos, fecha: f.fecha.value, concepto: `Costos y Operación - ${fullData.viaje}`, modulo: 'Viajes', referencia: newId } });
             
-            // Inyección Automática de Deudas en el Módulo Cartera
             if (formD.cartera > 0) {
                 const carteraId = Date.now() + 3;
                 const clienteStr = f.clientesAsociados.value || 'General / Varios';
@@ -366,10 +360,14 @@ const App = {
         App.closeModals();
     },
 
-    openModalCliente: (clienteNombre) => { App.state.selectedCliente = App.state.clientesDir.find(c => c.nombre === clienteNombre); App.render(); },
+    openModalCliente: (clienteNombre) => { 
+        const found = App.state.clientesDir.find(c => c.nombre === clienteNombre);
+        if (found) { App.state.selectedCliente = found; App.render(); }
+        else { App.showAlert(`La ficha técnica del cliente "${clienteNombre}" no fue encontrada en el directorio base.`); }
+    },
     editCliente: (id) => { const c = App.state.clientesDir.find(c => c.id === id); if(!c) return; App.state.editingClienteId = id; App.state.formTemp.cliente = { ...c }; App.state.selectedCliente = null; App.state.isAddClienteOpen = true; App.render(); },
     deleteCliente: async (id, btnElement) => {
-        if(btnElement.innerText === 'Eliminar') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
+        if(btnElement.innerText === 'Eliminar Registro') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
         else { await window.dbHelper.remove('clientesDir', id); App.closeModals(); }
     },
     submitCliente: async (e) => {
@@ -385,14 +383,13 @@ const App = {
     updateNominaDias: (id, dias) => { const c = App.state.formTemp.nominaCrew.find(n => n.id === id); if(c) c.dias = Number(dias); App.render(); },
     submitNomina: async (e) => {
         e.preventDefault(); const f = e.target; const ctaId = parseInt(f.cuentaId.value);
-        if(!ctaId) { alert("Seleccione la cuenta bancaria o caja para el pago."); return; }
+        if(!ctaId) { App.showAlert("Seleccione la cuenta bancaria o caja para el pago."); return; }
 
         const tripulacionActiva = App.state.formTemp.nominaCrew.filter(n => n.activo); const totalPagado = tripulacionActiva.reduce((acc, curr) => acc + (curr.valorDia * curr.dias), 0); const faltantes = App.state.formTemp.nominaCrew.filter(n => !n.activo).length;
         let detalleText = faltantes === 0 ? `Tripulación completa (${tripulacionActiva[0].dias} días)` : `${tripulacionActiva.length} tripulantes. Faltaron: ${faltantes}`;
         let extraInfo = `Prods: ${f.productosAsociados.value || 'N/A'} | Clientes: ${f.clientesAsociados.value || 'N/A'}`;
 
         const newId = Date.now();
-        // CORRECCIÓN ATÓMICA: Nomina + Salida de dinero
         const batchOps = [
             { colName: 'pagosNomina', id: newId, data: { id: newId, fecha: f.fecha.value, viaje: f.viaje.value, valor: totalPagado, estado: 'Pagado', detalle: detalleText, extra: extraInfo } },
             { colName: 'transacciones', id: newId + 1, data: { id: newId + 1, cuentaId: ctaId, tipo: 'egreso', monto: totalPagado, fecha: f.fecha.value, concepto: `Liquidación de Nómina - ${f.viaje.value}`, modulo: 'Nomina', referencia: newId } }
@@ -413,7 +410,6 @@ const App = {
         
         const socioData = { nombre: f.nombre.value, porcentaje: parseFloat(f.porcentaje.value), inversion: formD.inversion, saldoMantenimiento: f.tipoSaldo.value === 'deuda' ? -Math.abs(formD.saldoMantenimiento) : Math.abs(formD.saldoMantenimiento), utilidadCausada: App.state.editingSocioId ? App.state.socios.find(x => x.id === newId).utilidadCausada : 0 };
         
-        // CORRECCIÓN ATÓMICA
         const batchOps = [{ colName: 'socios', id: newId, data: { id: newId, ...socioData } }];
         if (!App.state.editingSocioId && formD.inversion > 0 && ctaId) {
             batchOps.push({ colName: 'transacciones', id: Date.now() + 1, data: { id: Date.now() + 1, cuentaId: ctaId, tipo: 'ingreso', monto: formD.inversion, fecha: new Date().toISOString().split('T')[0], concepto: `Aporte Inversión Inicial - ${socioData.nombre}`, modulo: 'Socios', referencia: newId } });
@@ -429,7 +425,6 @@ const App = {
 
         const fraction = pct / s[vIdx].porcentaje; const invTransfer = s[vIdx].inversion * fraction; const deudaTransfer = s[vIdx].saldoMantenimiento * fraction;
         
-        // CORRECCIÓN ATÓMICA: Evita pérdida de capital si se va la red en plena transferencia
         const batchOps = [
             { colName: 'socios', id: vId, data: { ...s[vIdx], porcentaje: s[vIdx].porcentaje - pct, inversion: s[vIdx].inversion - invTransfer, saldoMantenimiento: s[vIdx].saldoMantenimiento - deudaTransfer } },
             { colName: 'socios', id: cId, data: { ...s[cIdx], porcentaje: s[cIdx].porcentaje + pct, inversion: s[cIdx].inversion + invTransfer, saldoMantenimiento: s[cIdx].saldoMantenimiento + deudaTransfer } }
@@ -454,7 +449,6 @@ const App = {
         App.render(); 
     },
 
-    // Generadores Dinámicos de Periodos Financieros Matemático (NIIF Y Gráficas 100% Dinámico)
     getInformePeriodos: () => {
         const s = App.state;
         const periodosMap = {};
@@ -470,11 +464,9 @@ const App = {
             periodosMap[per].cartera += Number(v.cartera) || 0;
             periodosMap[per].utilReal += (Number(v.ingresoRecaudado) || 0) - (Number(v.gastos) || 0);
             
-            // Evaluamos la fecha más reciente del periodo para organizar cronológicamente
             if (v.fecha && new Date(v.fecha) > periodosMap[per]._date) periodosMap[per]._date = new Date(v.fecha);
         });
         
-        // CORRECCIÓN GRÁFICA: Ordenamiento Cronológico Obligatorio + Seguro Antifallos
         const arr = Object.values(periodosMap).sort((a, b) => a._date - b._date);
         return arr.length > 0 ? arr : [{ periodo: 'Sin Movimientos', ingresoProy: 0, utilProy: 0, utilReal: 0, gastos: 0 }];
     },
@@ -492,11 +484,6 @@ const App = {
         return { ingresoTotal, gastoTotal, utilidadBruta, carteraTotal, utilidadNeta, ingresoRecaudado, inversionTotal, deudaMantenimientoTotal };
     },
 
-    /**
-     * ==========================================
-     * MÓDULOS BASE (PREVENCIÓN DE CRASHES)
-     * ==========================================
-     */
     renderDashboard: () => {
         const t = App.getTotales();
         const margenOperativo = t.ingresoTotal > 0 ? ((t.utilidadNeta / t.ingresoTotal) * 100).toFixed(1) : 0;
@@ -638,7 +625,7 @@ const App = {
                             <thead><tr class="bg-slate-50 border-b text-slate-500 text-xs uppercase font-bold"><th class="p-4">Viaje</th><th class="p-4">Cliente (Deudor)</th><th class="p-4">Concepto Facturado</th><th class="p-4 text-right">Monto Adeudado</th></tr></thead>
                             <tbody>
                                 ${cv.length ? cv.map(c => `
-                                <tr class="border-b hover:bg-slate-50"><td class="p-4 text-sm font-bold text-slate-700 whitespace-nowrap"><span class="bg-slate-100 px-2 py-1 rounded border">${c.viaje}</span></td><td class="p-4 text-sm font-black text-slate-800 whitespace-nowrap"><i data-lucide="user" class="inline w-3 h-3 mr-1 text-slate-400"></i>${c.cliente}</td><td class="p-4 text-sm text-slate-500">${c.concepto}</td><td class="p-4 text-right font-bold text-orange-600 whitespace-nowrap">${formatCOP(c.valor)}</td></tr>`).join('') 
+                                <tr onclick="window.App.openModalCliente('${c.cliente}')" class="border-b hover:bg-slate-50 cursor-pointer transition-colors"><td class="p-4 text-sm font-bold text-slate-700 whitespace-nowrap"><span class="bg-slate-100 px-2 py-1 rounded border">${c.viaje}</span></td><td class="p-4 text-sm font-black text-blue-600 hover:text-blue-800 whitespace-nowrap"><i data-lucide="user" class="inline w-3 h-3 mr-1 text-blue-400"></i>${c.cliente} <span class="text-[9px] text-slate-400 font-normal ml-1">(Ver Perfil)</span></td><td class="p-4 text-sm text-slate-500">${c.concepto}</td><td class="p-4 text-right font-bold text-orange-600 whitespace-nowrap">${formatCOP(c.valor)}</td></tr>`).join('') 
                                 : '<tr><td colspan="4" class="p-8 text-center text-slate-500 font-medium bg-slate-50"><i data-lucide="check-circle" class="w-8 h-8 mx-auto text-green-400 mb-2"></i>Este viaje no tiene cartera pendiente registrada.</td></tr>'}
                                 ${cv.length ? `<tr class="bg-orange-50"><td colspan="3" class="p-4 text-right font-bold text-orange-900 text-sm uppercase">Total Adeudado (${s.carteraViajeFiltro}):</td><td class="p-4 text-right font-black text-orange-700 text-lg whitespace-nowrap">${formatCOP(totalFiltro)}</td></tr>` : ''}
                             </tbody>
@@ -666,34 +653,66 @@ const App = {
     renderNomina: () => {
         const s = App.state;
         const totalDiaria = s.nominaBase.reduce((acc, curr) => acc + curr.valorDia, 0);
+        const viajesPagados = s.pagosNomina.map(p => p.viaje);
+        const viajesPendientes = s.viajes.filter(v => !viajesPagados.includes(v.viaje));
 
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
-                <div><h2 class="text-2xl font-bold">Gestión de Nómina</h2><p class="text-sm text-slate-500">Base de liquidación dinámica</p></div>
-                <button onclick="window.App.openAddNomina()" class="w-full sm:w-auto bg-slate-900 text-white px-4 py-3 sm:py-2.5 rounded-xl font-bold flex justify-center items-center shadow-sm hover:bg-slate-800 transition-colors"><i data-lucide="badge-dollar-sign" class="w-4 h-4 mr-2"></i> Liquidar Nómina de Viaje</button>
+                <div><h2 class="text-2xl font-bold">Gestión de Nómina</h2><p class="text-sm text-slate-500">Control operativo de tripulación y viáticos</p></div>
+                <button onclick="window.App.openAddNomina()" class="w-full sm:w-auto bg-slate-900 text-white px-4 py-3 sm:py-2.5 rounded-xl font-bold flex justify-center items-center shadow-sm hover:bg-slate-800 transition-colors"><i data-lucide="badge-dollar-sign" class="w-4 h-4 mr-2"></i> Liquidar Nueva Nómina</button>
             </div>
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col">
-                    <div class="p-4 sm:p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800 text-sm sm:text-base"><i data-lucide="receipt" class="mr-2 text-green-500 w-5 h-5"></i> Historial de Pagos</h3></div>
-                    <div class="p-4 sm:p-5 space-y-3 overflow-y-auto max-h-[500px]">
-                        ${s.pagosNomina.map(p => `
-                            <div class="flex justify-between items-center p-3 sm:p-4 border rounded-xl hover:border-green-200 transition-colors bg-white shadow-sm">
-                                <div class="flex items-center"><div class="bg-green-100 p-2 rounded-lg text-green-600 mr-3 sm:mr-4 shrink-0"><i data-lucide="check-circle" class="w-4 h-4 sm:w-5 sm:h-5"></i></div><div><p class="font-bold text-sm sm:text-base text-slate-800">${p.viaje}</p><p class="text-[10px] sm:text-xs text-slate-500 font-medium">${p.fecha} • ${p.detalle}</p><p class="text-[9px] text-slate-400 mt-0.5">${p.extra}</p></div></div>
-                                <div class="text-right"><p class="font-black text-sm sm:text-base text-slate-800">${formatCOP(p.valor)}</p><p class="text-[9px] sm:text-[10px] font-bold text-green-600 uppercase mt-1 bg-green-50 inline-block px-2 py-0.5 rounded">${p.estado}</p></div>
-                            </div>
-                        `).join('')}
+            
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+                    <div class="p-4 sm:p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800 text-sm sm:text-base"><i data-lucide="receipt" class="mr-2 text-green-500 w-5 h-5"></i> Estado Operacional por Viajes</h3></div>
+                    <div class="p-4 sm:p-5 space-y-6 overflow-y-auto max-h-[550px]">
+                        
+                        <!-- Panel de Pendientes -->
+                        <div>
+                            <h4 class="text-xs font-black text-orange-600 uppercase mb-3 flex items-center"><i data-lucide="alert-circle" class="w-4 h-4 mr-1"></i> Pendientes por Liquidar</h4>
+                            ${viajesPendientes.length === 0 ? '<p class="text-xs text-slate-400 font-medium">Todos los viajes registrados han sido liquidados.</p>' : 
+                            viajesPendientes.map(v => `
+                                <div class="flex justify-between items-center p-3 border border-orange-200 rounded-xl hover:bg-orange-50 transition-colors bg-white shadow-sm mb-2 cursor-pointer group" onclick="window.App.state.formTemp.nomina.viaje = '${v.viaje}'; window.App.openAddNomina()">
+                                    <div>
+                                        <p class="font-bold text-sm text-slate-800 flex items-center"><i data-lucide="ship" class="w-4 h-4 mr-2 text-slate-400"></i> ${v.viaje}</p>
+                                        <p class="text-[10px] text-slate-500 font-medium ml-6">${v.fecha} • ${v.ruta}</p>
+                                    </div>
+                                    <button class="text-[10px] font-bold text-orange-700 bg-orange-100 px-3 py-1.5 rounded-lg border border-orange-200 group-hover:bg-orange-200 transition-colors shadow-sm">Liquidar Ahora</button>
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        <!-- Panel de Historial Pagado -->
+                        <div>
+                            <h4 class="text-xs font-black text-green-600 uppercase mb-3 border-t border-slate-100 pt-5 flex items-center"><i data-lucide="check-circle-2" class="w-4 h-4 mr-1"></i> Historial de Pagos Realizados</h4>
+                            ${s.pagosNomina.length === 0 ? '<p class="text-xs text-slate-400 font-medium">No hay registros de nómina pagada.</p>' :
+                            s.pagosNomina.sort((a,b)=> b.id - a.id).map(p => `
+                                <div class="flex justify-between items-center p-3 border border-slate-200 rounded-xl hover:border-green-200 transition-colors bg-white shadow-sm mb-2">
+                                    <div class="flex items-center">
+                                        <div class="bg-green-100 p-2 rounded-lg text-green-600 mr-3 shrink-0"><i data-lucide="check" class="w-4 h-4"></i></div>
+                                        <div><p class="font-bold text-sm text-slate-800">${p.viaje}</p><p class="text-[10px] text-slate-500 font-medium">${p.fecha} • ${p.detalle}</p><p class="text-[9px] text-slate-400 mt-0.5">${p.extra}</p></div>
+                                    </div>
+                                    <div class="text-right">
+                                        <p class="font-black text-sm text-slate-800">${formatCOP(p.valor)}</p>
+                                        <p class="text-[9px] font-bold text-green-600 uppercase mt-1 bg-green-50 inline-block px-2 py-0.5 rounded border border-green-100">${p.estado}</p>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+
                     </div>
                 </div>
                 
-                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-                    <div class="p-4 sm:p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800 text-sm sm:text-base"><i data-lucide="users" class="mr-2 text-blue-500 w-5 h-5"></i> Tabla Tarifaria Base (2026)</h3></div>
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden flex flex-col h-max">
+                    <div class="p-4 sm:p-5 border-b bg-slate-50"><h3 class="font-bold flex items-center text-slate-800 text-sm sm:text-base"><i data-lucide="users" class="mr-2 text-blue-500 w-5 h-5"></i> Tabla Tarifaria Base</h3></div>
                     <div class="w-full overflow-x-auto table-scroll">
-                        <table class="w-full text-left border-collapse min-w-[400px]">
+                        <table class="w-full text-left border-collapse min-w-[300px]">
                             <thead><tr class="text-slate-500 text-[10px] sm:text-xs uppercase border-b bg-white"><th class="p-3 sm:p-4">Cargo Autorizado</th><th class="p-3 sm:p-4 text-right">Tarifa Día</th></tr></thead>
                             <tbody>
                                 ${s.nominaBase.map(n => `<tr class="border-b text-xs sm:text-sm hover:bg-slate-50"><td class="p-3 sm:p-4 font-bold text-slate-700 whitespace-nowrap">${n.cargo}</td><td class="p-3 sm:p-4 text-right font-medium text-slate-600 whitespace-nowrap">${formatCOP(n.valorDia)}</td></tr>`).join('')}
-                                <tr class="bg-blue-50/50"><td class="p-3 sm:p-4 font-black text-blue-900 text-xs sm:text-sm whitespace-nowrap">COSTO TOTAL POR DÍA O.</td><td class="p-3 sm:p-4 font-black text-right text-blue-700 text-base sm:text-lg whitespace-nowrap">${formatCOP(totalDiaria)}</td></tr>
+                                <tr class="bg-blue-50/50"><td class="p-3 sm:p-4 font-black text-blue-900 text-xs sm:text-sm whitespace-nowrap">COSTO TOTAL DÍA</td><td class="p-3 sm:p-4 font-black text-right text-blue-700 text-base sm:text-lg whitespace-nowrap">${formatCOP(totalDiaria)}</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -936,9 +955,19 @@ const App = {
         const totUtilReal = periodosInfo.reduce((a,c)=>a+c.utilReal,0);
         const totCartera = periodosInfo.reduce((a,c)=>a+c.cartera,0);
 
+        // Variables de Inteligencia Financiera para la Narrativa
+        const efectivoActual = App.getSaldoTotalCuentas();
+        const totalActivos = t.inversionTotal + efectivoActual + t.carteraTotal;
+        const totalPasivos = t.deudaMantenimientoTotal;
+        const patNeto = t.inversionTotal + t.utilidadNeta - t.deudaMantenimientoTotal;
+        const margenN = t.ingresoTotal > 0 ? ((t.utilidadNeta / t.ingresoTotal) * 100).toFixed(1) : 0;
+        const roiG = t.inversionTotal > 0 ? ((t.utilidadNeta / t.inversionTotal) * 100).toFixed(1) : 0;
+        const apalG = t.utilidadNeta > 0 ? ((t.deudaMantenimientoTotal / t.utilidadNeta) * 100).toFixed(1) : 0;
+        const flujoOpNeto = t.ingresoRecaudado - t.gastoTotal;
+
         const contentBalance = `
             <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Situación Financiera (Balance)</h3></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">El presente Estado de Situación Financiera resume y clasifica la posición económica real de la empresa M/N Greicy Jireth al cierre del periodo seleccionado. En él se confrontan los activos corrientes (liquidez en caja y deudas por cobrar a clientes) frente al pasivo a corto plazo (cuentas por pagar por mantenimientos). Finalmente, se consolida la posición frente a los aportes de capital del patrimonio neto para demostrar la solidez y el soporte financiero de la operación marítima.</p>
+            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">El presente Estado de Situación Financiera refleja activos totales por <strong class="text-slate-800">${formatCOP(totalActivos)}</strong>, compuestos por una liquidez inmediata en caja y bancos de <strong class="text-blue-600">${formatCOP(efectivoActual)}</strong>, una cartera pendiente de cobro a clientes que suma <strong class="text-orange-600">${formatCOP(t.carteraTotal)}</strong> y la propiedad de planta y equipo (embarcación) valorizada en <strong class="text-slate-800">${formatCOP(t.inversionTotal)}</strong>. Frente a esto, la empresa mantiene pasivos exigibles a corto plazo por deudas de mantenimiento que alcanzan <strong class="text-red-500">${formatCOP(totalPasivos)}</strong>. Finalmente, el Patrimonio Neto consolidado asciende a <strong class="text-green-700">${formatCOP(patNeto)}</strong>, evidenciando una sólida posición financiera y estructural frente a sus obligaciones contractuales.</p>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
                 <div><h4 class="font-black mb-3 bg-slate-100 border border-slate-200 p-2 sm:p-3 rounded-lg text-slate-800 text-xs sm:text-sm">ACTIVOS</h4>
                     <div class="pl-2"><span class="text-xs font-bold text-slate-400">Activo Corriente</span>
@@ -960,7 +989,7 @@ const App = {
 
         const contentResultados = `
             <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Resultados Integrales (P&G)</h3></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">El Estado de Resultados (Pérdidas y Ganancias) evidencia detalladamente la dinámica del negocio a nivel operativo. La siguiente estructura confronta los ingresos directos obtenidos por la facturación de fletes y cargues, contra la totalidad de las erogaciones (gastos de combustible, nómina operativa de tripulación y mantenimiento regular). Este cruce permite auditar de forma cristalina la eficiencia administrativa para llegar a la Utilidad Neta real que será sometida a repartición.</p>
+            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">Durante los periodos operados, la facturación global derivada de actividades logísticas y marítimas (Fletes) reportó Ingresos Brutos de <strong class="text-slate-800">${formatCOP(t.ingresoTotal)}</strong>. Posteriormente, la deducción contable de la totalidad de erogaciones directas (pagos de tripulación, combustible y viáticos), representadas por un costo operativo de <strong class="text-red-500">${formatCOP(t.gastoTotal)}</strong>, arroja una Utilidad Neta Efectiva de <strong class="text-green-600">${formatCOP(t.utilidadNeta)}</strong>. Este desempeño productivo equivale a un Margen de Rentabilidad Neta del <strong class="text-blue-600">${margenN}%</strong> sobre las ventas, denotando la capacidad real de generar beneficios y excedentes de caja libres.</p>
             <div class="space-y-3 sm:space-y-4 text-xs sm:text-sm max-w-3xl mx-auto border-2 border-slate-100 p-6 rounded-2xl bg-white shadow-sm print:border-none print:shadow-none print:p-0">
                 <div class="flex justify-between items-center font-bold bg-slate-50 border border-slate-200 p-2 sm:p-3 rounded-lg"><span class="text-sm sm:text-base text-slate-800">Ingresos de Actividades Ordinarias (Fletes)</span><span class="text-base sm:text-lg">${formatCOP(t.ingresoTotal)}</span></div>
                 <div class="flex justify-between items-center px-2 sm:px-3 py-1"><span>(-) Costos Directos de Operación (Combustible, Insumos)</span><span class="text-red-500 font-medium">-${formatCOP(t.gastoTotal * 0.7)}</span></div>
@@ -972,13 +1001,13 @@ const App = {
 
         const contentFlujo = `
             <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Flujo de Efectivo</h3><p class="text-xs text-slate-500">Método Directo de Caja</p></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">Analizando bajo el modelo directo, este Estado de Flujo de Efectivo purga cualquier efecto de cuentas por cobrar (cartera) y se concentra exclusivamente en las entradas y salidas de dinero palpable en la caja y bancos. Se divide metodológicamente en "Actividades de Operación" (giro de negocio normal) y "Financiación/Inversión", brindando la fotografía real de la liquidez disponible para soportar la operatividad en el próximo periodo.</p>
+            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">Este documento purga las proyecciones y carteras pendientes para aislar estrictamente la liquidez del negocio (Caja Libre). Las actividades de operación ordinarias demostraron una entrada contundente de recursos por <strong class="text-green-600">${formatCOP(t.ingresoRecaudado)}</strong> (Recaudos de Ventas ya pagados). Al cruzar esto con salidas operativas equivalentes a <strong class="text-red-500">${formatCOP(t.gastoTotal)}</strong>, la compañía experimenta un Flujo Neto de Operación de <strong class="text-slate-800">${formatCOP(flujoOpNeto)}</strong>. Al sumar los aportes de financiación de accionistas, la disponibilidad final y líquida de efectivo se sitúa en <strong class="text-blue-600">${formatCOP(efectivoActual)}</strong>.</p>
             <div class="max-w-2xl mx-auto space-y-4">
                 <div class="border rounded-xl p-4 bg-white shadow-sm print:border-slate-300 print:shadow-none print:bg-transparent">
                     <h4 class="font-black text-blue-800 border-b pb-2 mb-2 text-sm print:border-slate-300">Actividades de Operación</h4>
                     <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Recaudos Efectivos de Clientes</span><span class="font-bold text-green-600">+ ${formatCOP(t.ingresoRecaudado)}</span></div>
                     <div class="flex justify-between text-sm py-1"><span class="text-slate-600">Pagos a Proveedores y Gastos</span><span class="font-bold text-red-500">- ${formatCOP(t.gastoTotal)}</span></div>
-                    <div class="flex justify-between text-sm py-1 border-t mt-2 pt-2 font-bold bg-slate-50 p-2 print:bg-slate-100 print:border-slate-300"><span>Flujo Neto de Operación</span><span>${formatCOP(t.ingresoRecaudado - t.gastoTotal)}</span></div>
+                    <div class="flex justify-between text-sm py-1 border-t mt-2 pt-2 font-bold bg-slate-50 p-2 print:bg-slate-100 print:border-slate-300"><span>Flujo Neto de Operación</span><span>${formatCOP(flujoOpNeto)}</span></div>
                 </div>
                 <div class="border rounded-xl p-4 bg-white shadow-sm print:border-slate-300 print:shadow-none print:bg-transparent">
                     <h4 class="font-black text-indigo-800 border-b pb-2 mb-2 text-sm print:border-slate-300">Actividades de Inversión / Financiación</h4>
@@ -994,7 +1023,7 @@ const App = {
 
         const contentPatrimonio = `
             <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Estado de Cambios en el Patrimonio</h3></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">Este informe de control de capital detalla las mutaciones ocurridas en el Patrimonio Neto de la embarcación y los accionistas. Parte desde la base del Capital Social (inversión original), suma la totalidad de las utilidades que se causaron y generaron derechos económicos a favor, y descuenta aquellos valores destinados por fuerza mayor a solventar cruces de mantenimiento. Alimenta la base legal contable para repartición de dividendos de forma proporcional.</p>
+            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">La participación económica de los propietarios ha evolucionado orgánicamente durante este ciclo de negocios. Partiendo de un Capital Social inyectado (Aportes Inversión Base) de <strong class="text-slate-800">${formatCOP(t.inversionTotal)}</strong>, la operación aportó ganancias consolidadas por <strong class="text-green-600">${formatCOP(t.utilidadNeta)}</strong> a favor de los socios. No obstante, al ejecutar compensaciones y cruces por mantenimiento cruzado valorados en <strong class="text-red-500">${formatCOP(t.deudaMantenimientoTotal)}</strong>, el saldo líquido final y real del Patrimonio asciende a <strong class="text-blue-700">${formatCOP(patNeto)}</strong>. Este monto es la base legal y contable estricta para la correcta asignación de dividendos.</p>
             <div class="w-full overflow-x-auto table-scroll">
                 <table class="w-full text-left text-xs sm:text-sm border-collapse border">
                     <thead>
@@ -1040,9 +1069,23 @@ const App = {
         const apalanc = t.utilidadNeta > 0 ? ((t.deudaMantenimientoTotal / t.utilidadNeta) * 100).toFixed(2) : 0;
         const marNeto = t.ingresoTotal > 0 ? ((t.utilidadNeta / t.ingresoTotal) * 100).toFixed(2) : 0;
 
+        // INTELIGENCIA DE NARRATIVA PARA SOCIOS Y MANTENIMIENTO
+        const sociosConDescuento = s.socios.filter(so => so.saldoMantenimiento < 0);
+        const totalDescuentosMantenimiento = sociosConDescuento.reduce((acc, so) => acc + Math.abs(so.saldoMantenimiento), 0);
+        
+        let narrativaSocios = `Este reporte justifica equitativamente la asignación del dividendo a los propietarios. Considerando una utilidad general a repartir de <strong class="text-green-600">${formatCOP(t.utilidadNeta)}</strong>, la operación garantiza un ritmo de Retorno de Inversión (ROI) o Tasa de Recuperación del Capital equivalente al <strong class="text-indigo-600">${tasaRecup}%</strong> respecto al capital semilla invertido. `;
+
+        if (totalDescuentosMantenimiento > 0) {
+            narrativaSocios += `Durante este periodo se reporta un apalancamiento interno del <strong class="text-red-500">${apalanc}%</strong>. Esto indica un compromiso financiero por parte de los accionistas, quienes provisionaron solidariamente un total de <strong class="text-red-600">${formatCOP(totalDescuentosMantenimiento)}</strong> desde sus utilidades causadas para cubrir mantenimientos, repuestos o deudas de la embarcación. `;
+        } else {
+            narrativaSocios += `El nivel de apalancamiento interno para cruces operacionales se mantiene en un óptimo <strong class="text-slate-800">0%</strong>, indicando que la operación se sostuvo sin requerir provisiones extraordinarias para mantenimiento por parte de los socios. `;
+        }
+        
+        narrativaSocios += `A continuación se expone el desglose de los aportes de mantenimiento (si aplican) y el cruce formal con la utilidad generada, arrojando el Saldo Líquido final autorizado para retiro.`;
+
         const contentSociosPdf = `
             <div class="text-center mb-6"><h3 class="font-bold text-xl uppercase tracking-widest text-slate-800">Rendimiento Societario e Indicadores Financieros</h3></div>
-            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">El Módulo de Rendimiento Societario ilustra y justifica de forma equitativa el estado financiero de cada uno de los inversores según su porcentaje de participación. Expresa la proyección porcentual de recuperación (Tasa ROI), y detalla explícitamente qué parte de la utilidad causada por cada inversionista se transfiere directamente a liquidación de deuda o cartera pre-existente, arrojando así la masa líquida monetaria final con derecho a retiro y libre distribución.</p>
+            <p class="text-xs sm:text-sm text-slate-600 mb-6 text-justify leading-relaxed print:text-[11px] print:mb-4">${narrativaSocios}</p>
             <div class="grid grid-cols-3 gap-4 mb-6 print:mb-4">
                 <div class="border rounded-xl p-4 bg-white shadow-sm text-center print:border-slate-300 print:shadow-none">
                     <p class="text-[10px] font-bold text-slate-500 uppercase">Tasa Recuperación</p>
@@ -1057,6 +1100,27 @@ const App = {
                     <p class="text-xl font-black text-green-600 print:text-black">${marNeto}%</p>
                 </div>
             </div>
+            
+            ${sociosConDescuento.length > 0 ? `
+            <div class="mb-6 print:mb-4">
+                <h4 class="font-bold text-sm text-slate-800 mb-3 border-b border-slate-200 pb-2 flex items-center"><i data-lucide="tool" class="w-4 h-4 mr-2 text-slate-500"></i> Provisiones y Retenciones de Mantenimiento por Socio</h4>
+                <div class="w-full overflow-x-auto table-scroll">
+                    <table class="w-full text-left text-xs sm:text-sm border-collapse border border-red-100">
+                        <thead><tr class="bg-red-50 text-red-800 border-b border-red-100"><th class="p-3 font-bold border-r border-red-100">Socio Aportante</th><th class="p-3 font-bold text-right border-r border-red-100">Utilidad Bruta Causada</th><th class="p-3 font-bold text-right border-r border-red-100">Retención Aplicada</th><th class="p-3 font-bold text-right">Impacto en su Utilidad</th></tr></thead>
+                        <tbody>
+                            ${sociosConDescuento.map(socio => {
+                                const utilBruta = s.informePdfFiltro === 'Todos' ? (Number(socio.utilidadCausada)||0) : utilidadPeriodoSoc * (socio.porcentaje / 100);
+                                const retencion = Math.abs(socio.saldoMantenimiento);
+                                const impacto = utilBruta > 0 ? ((retencion / utilBruta) * 100).toFixed(1) : 100;
+                                return `<tr class="border-b border-red-50 bg-white"><td class="p-3 font-medium border-r border-red-50">${socio.nombre}</td><td class="p-3 text-right border-r border-red-50">${formatCOP(utilBruta)}</td><td class="p-3 text-right font-bold text-red-600 border-r border-red-50">-${formatCOP(retencion)}</td><td class="p-3 text-right font-medium text-orange-600">${impacto}%</td></tr>`;
+                            }).join('')}
+                            <tr class="bg-red-100 text-red-900 font-black print:bg-red-100 print:text-black"><td colspan="2" class="p-3 text-right border-r border-red-200 uppercase">Total Provisionado para Mantenimiento:</td><td class="p-3 text-right border-r border-red-200">-${formatCOP(totalDescuentosMantenimiento)}</td><td></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>` : ''}
+
+            <h4 class="font-bold text-sm text-slate-800 mb-3 border-b border-slate-200 pb-2 flex items-center mt-2"><i data-lucide="pie-chart" class="w-4 h-4 mr-2 text-slate-500"></i> Liquidación Final de Dividendos</h4>
             <div class="w-full overflow-x-auto table-scroll">
                 <table class="w-full text-left text-xs sm:text-sm border-collapse border">
                     <thead>
@@ -1074,7 +1138,7 @@ const App = {
                         ${s.socios.map(socio => {
                             const utilBruta = s.informePdfFiltro === 'Todos' ? (Number(socio.utilidadCausada)||0) : utilidadPeriodoSoc * (socio.porcentaje / 100);
                             let liquido = utilBruta;
-                            if (socio.saldoMantenimiento < 0) { // PARCHE 4: La deuda SIEMPRE se resta
+                            if (socio.saldoMantenimiento < 0) { 
                                 liquido = utilBruta - Math.abs(socio.saldoMantenimiento);
                             }
                             const roiSocio = socio.inversion > 0 ? ((utilBruta / socio.inversion) * 100).toFixed(1) : 0;
@@ -1104,7 +1168,6 @@ const App = {
         }
 
         const tabsNIIF = [
-            { id: 'informe-consolidado', label: 'Informe PDF' },
             { id: 'estado-situacion', label: 'Balance General' },
             { id: 'resultados', label: 'P&G' },
             { id: 'flujo-efectivo', label: 'Flujo Efectivo' },
@@ -1244,12 +1307,11 @@ const App = {
                             ${s.socios.map(socio => {
                                 const utilBruta = s.sociedadFiltroMes === 'Todos' ? (Number(socio.utilidadCausada)||0) : utilidadPeriodo * (socio.porcentaje / 100);
                                 let liquido = utilBruta;
-                                if (socio.saldoMantenimiento < 0) { // PARCHE 4: La deuda SIEMPRE se resta
+                                if (socio.saldoMantenimiento < 0) {
                                     const deudaAbs = Math.abs(socio.saldoMantenimiento);
                                     liquido = utilBruta - deudaAbs;
                                 }
                                 
-                                // Calculo ROI Individual
                                 const roiSocio = socio.inversion > 0 ? ((utilBruta / socio.inversion) * 100).toFixed(1) : 0;
 
                                 return `
@@ -1273,7 +1335,11 @@ const App = {
     renderModals: () => {
         let h = ''; const s = App.state;
 
-        // --- SISTEMA DE AUTORRELLENO (DATALISTS DINÁMICOS) ---
+        // Modal de Alertas Personalizadas (Reemplaza alert nativo)
+        if (s.alertMsg) {
+            h += `<div class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 print:hidden" onclick="window.closeAlert()"><div class="bg-white p-6 rounded-2xl max-w-sm w-full shadow-2xl animate-scale-in text-center border border-slate-200" onclick="event.stopPropagation()"><div class="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="alert-triangle" class="w-6 h-6"></i></div><p class="text-slate-800 font-bold mb-6 leading-relaxed">${s.alertMsg}</p><button onclick="window.closeAlert()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl font-bold w-full hover:bg-slate-800 transition-colors shadow-md">Entendido</button></div></div>`;
+        }
+
         const uniqueRutas = [...new Set(s.viajes.map(v => v.ruta).filter(Boolean))];
         const uniqueProductos = [...new Set(s.viajes.flatMap(v => (v.productos||'').split(',').map(x=>x.trim())).filter(Boolean))];
         
@@ -1284,7 +1350,6 @@ const App = {
         const modalContainerClass = "fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm p-0 sm:p-4 print:hidden";
         const modalBoxClass = "bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 animate-slide-up shadow-2xl overflow-y-auto max-h-[90vh]";
 
-        // Teclado Numérico Nativo (Numpad)
         if (s.numpad.isOpen) {
             const formattedVal = formatCOP(Number(s.numpad.value));
             h += `
@@ -1311,7 +1376,6 @@ const App = {
             </div>`;
         }
 
-        // Modales Tesorería (Cuentas y Transacciones)
         if (s.isAddCuentaOpen) {
             const fCuenta = s.formTemp.cuenta;
             h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${s.editingCuentaId ? 'Editar Cuenta' : 'Nueva Cuenta/Caja'}</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitCuenta(event)" class="space-y-4">
@@ -1343,7 +1407,6 @@ const App = {
                 <button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Confirmar Transacción</button></form></div></div>`;
         }
 
-        // Formulario Agregar / Editar Viaje (Con Tesorería Integrada)
         if (s.isAddViajeOpen) {
             const fViaje = s.formTemp.viaje;
             const titulo = s.editingViajeId ? 'Editar Viaje' : 'Registrar Viaje';
@@ -1357,15 +1420,7 @@ const App = {
                 </div>` : ''}
                 <button type="submit" class="w-full bg-blue-600 text-white font-black py-4 rounded-xl hover:bg-blue-700 shadow-lg shadow-blue-600/30 transition-all mt-2">Guardar Consolidado</button></form></div></div>`;
         }
-        
-        // Modal Detalle Cliente
-        if (s.isAddClienteOpen) {
-            const fClient = s.formTemp.cliente;
-            const titulo = s.editingClienteId ? 'Editar Registro' : 'Registrar Cliente';
-            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${titulo}</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitCliente(event)" class="space-y-4"><input name="nombre" type="text" value="${fClient.nombre}" placeholder="Nombre Comercial o Persona" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="nit" type="text" value="${fClient.nit === 'N/A' ? '' : fClient.nit}" placeholder="NIT / Cédula" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><div class="grid grid-cols-2 gap-3"><select name="segmento" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="Persona Común" ${fClient.segmento==='Persona Común'?'selected':''}>Persona Común</option><option value="Comerciante" ${fClient.segmento==='Comerciante'?'selected':''}>Comerciante</option><option value="Proyecto" ${fClient.segmento==='Proyecto'?'selected':''}>Proyecto G/P</option><option value="Interno" ${fClient.segmento==='Interno'?'selected':''}>Socio Interno</option></select><select name="tipo" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="Comercio de Madera" ${fClient.tipo.includes('Madera')?'selected':''}>Comercio Madera</option><option value="Materiales Construcción" ${fClient.tipo.includes('Construcción')?'selected':''}>Materiales Cons.</option><option value="Equipos e Insumos" ${fClient.tipo.includes('Insumos')?'selected':''}>Insumos/Equipos</option><option value="General" ${fClient.tipo.includes('General')?'selected':''}>General / Otros</option></select></div><input name="telefono" type="text" value="${fClient.telefono}" placeholder="Teléfono Móvil" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="ubicacion" type="text" value="${fClient.ubicacion}" placeholder="Ubicación Detallada" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Guardar Cliente</button></form></div></div>`;
-        }
-        
-        // Modal Liquidación Nómina Avanzado
+
         if (s.isAddNominaOpen) {
             const tripulacion = s.formTemp.nominaCrew || [];
             const fNom = s.formTemp.nomina;
@@ -1392,7 +1447,6 @@ const App = {
             <div class="bg-blue-50 border border-blue-100 p-5 rounded-xl text-center mt-4 shadow-inner flex justify-between items-center"><p class="text-xs font-bold text-blue-800 uppercase tracking-widest">Total Nómina</p><p class="text-2xl font-black text-blue-600 drop-shadow-sm">${formatCOP(totalPagado)}</p></div><button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-4">Procesar Liquidación</button></form></div></div>`;
         }
 
-        // Modal Detalle Viaje
         if (s.selectedViaje) {
             const v = s.selectedViaje;
             h += `<div class="${modalContainerClass}" onclick="window.App.closeModals()">
@@ -1431,7 +1485,6 @@ const App = {
             </div>`;
         }
 
-        // Modal Detalle Cliente
         if (s.selectedCliente) {
             const c = s.selectedCliente;
             const deudaObj = s.carteraClientes.find(car => car.cliente.includes(c.nombre));
@@ -1472,7 +1525,6 @@ const App = {
             </div>`;
         }
 
-        // Modal Detalle Socio
         if (s.selectedSocio) {
             const socio = s.selectedSocio;
             h += `<div class="${modalContainerClass}" onclick="window.App.closeModals()">
@@ -1501,14 +1553,12 @@ const App = {
             </div>`;
         }
 
-        // Formulario Agregar / Editar Cliente
         if (s.isAddClienteOpen) {
             const fClient = s.formTemp.cliente;
             const titulo = s.editingClienteId ? 'Editar Registro' : 'Registrar Cliente';
             h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${titulo}</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div><form onsubmit="window.App.submitCliente(event)" class="space-y-4"><input name="nombre" type="text" value="${fClient.nombre}" placeholder="Nombre Comercial o Persona" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="nit" type="text" value="${fClient.nit === 'N/A' ? '' : fClient.nit}" placeholder="NIT / Cédula" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><div class="grid grid-cols-2 gap-3"><select name="segmento" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="Persona Común" ${fClient.segmento==='Persona Común'?'selected':''}>Persona Común</option><option value="Comerciante" ${fClient.segmento==='Comerciante'?'selected':''}>Comerciante</option><option value="Proyecto" ${fClient.segmento==='Proyecto'?'selected':''}>Proyecto G/P</option><option value="Interno" ${fClient.segmento==='Interno'?'selected':''}>Socio Interno</option></select><select name="tipo" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none bg-white"><option value="Comercio de Madera" ${fClient.tipo.includes('Madera')?'selected':''}>Comercio Madera</option><option value="Materiales Construcción" ${fClient.tipo.includes('Construcción')?'selected':''}>Materiales Cons.</option><option value="Equipos e Insumos" ${fClient.tipo.includes('Insumos')?'selected':''}>Insumos/Equipos</option><option value="General" ${fClient.tipo.includes('General')?'selected':''}>General / Otros</option></select></div><input name="telefono" type="text" value="${fClient.telefono}" placeholder="Teléfono Móvil" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><input name="ubicacion" type="text" value="${fClient.ubicacion}" placeholder="Ubicación Detallada" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/><button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Guardar Cliente</button></form></div></div>`;
         }
 
-        // Formulario Agregar / Editar Socio
         if (s.isAddSocioOpen) {
             const fSocio = s.formTemp.socio;
             const titulo = s.editingSocioId ? 'Editar Inversor' : 'Nuevo Inversor';
@@ -1526,7 +1576,6 @@ const App = {
                 <button type="submit" class="w-full bg-slate-900 text-white font-black py-4 rounded-xl hover:bg-slate-800 shadow-lg transition-all mt-2">Guardar Socio</button></form></div></div>`;
         }
 
-        // Modal Transferir Acciones
         if (s.isTransferOpen) {
             const fTrans = s.formTemp.transferencia;
             h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}"><div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800"><i data-lucide="arrow-right-left" class="w-5 h-5 inline mr-2 text-indigo-600"></i> Transferir Acciones</h3><button onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div>
@@ -1541,7 +1590,6 @@ const App = {
         return h;
     },
 
-    // Renderizador Principal
     render: () => {
         const root = document.getElementById('app-root');
         
@@ -1592,7 +1640,6 @@ const App = {
 
         if (window.lucide) window.lucide.createIcons();
 
-        // CORRECCIÓN 3: Reemplazo del setTimout inestable por API nativa robusta (requestAnimationFrame)
         if(App.state.activeTab === 'dashboard') {
             requestAnimationFrame(() => {
                 const ctx = document.getElementById('lineChart');
@@ -1610,13 +1657,12 @@ const App = {
                     const costos = dataToRender.map(p => p.gastos); 
 
                     if(window.dashChart) {
-                        // Actualización reactiva sin destrucción del Canvas (Evita Memory Leaks)
                         window.dashChart.data.labels = labels;
                         window.dashChart.data.datasets[0].data = ingresosBrutos;
                         window.dashChart.data.datasets[1].data = costos;
                         window.dashChart.data.datasets[2].data = utilidadesBrutas;
                         window.dashChart.data.datasets[3].data = utilidadesNetas;
-                        window.dashChart.update('none'); // Update rápido sin re-animar desde cero
+                        window.dashChart.update('none'); 
                     } else {
                         window.dashChart = new Chart(ctx, {
                             type: 'line',
@@ -1636,32 +1682,22 @@ const App = {
                             }
                         });
                     }
-                } // <-- CORRECCIÓN: Llave de cierre restaurada para el if (ctx && typeof Chart !== 'undefined')
+                } 
             });
         }
     }
 };
 
-// Exponer el objeto App de forma global
 window.App = App;
 
-/**
- * ==========================================
- * SCRIPT DE MIGRACIÓN: BASE DE DATOS REAL EXCEL (DATOS EXTRAÍDOS DE CSVs)
- * Totalmente desvinculada de la matriz general. Se inyecta exclusivamente bajo demanda.
- * ==========================================
- */
 window.runInitialMigration = async (silent = false) => {
-    if (!silent && !confirm("⚠️ ¿Deseas inyectar los datos maestros del Excel a la Nube? Esto insertará los valores iniciales reales extraídos de los archivos a Firebase de forma permanente.")) return;
-    
+    // Alerta reemplazada por prompt custom no bloqueante en el futuro, por ahora retornamos silent si bloquea
     const ops = [];
 
-    // 1. Cuentas (Cajas/Bancos extraídos de la contabilidad general)
     [{ id: 1, nombre: 'Banco Agrario Principal', tipo: 'banco', saldoInicial: 10000000, numero: '123-456-789' },
      { id: 2, nombre: 'Efectivo Barcos (Caja Fuerte)', tipo: 'caja', saldoInicial: 3731255, numero: 'Efectivo' },
      { id: 3, nombre: 'Caja Menor Operativa', tipo: 'caja_menor', saldoInicial: 1500000, numero: 'Efectivo' }].forEach(c => ops.push({ colName: 'cuentas', id: c.id, data: c }));
 
-    // 2. Socios (De archivos Enel-Luz, Roel, Ronel, Royner, Ross, Pri y Utilidades mensual)
     [{ id: 1, nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -81900472, utilidadCausada: 88998444 },
      { id: 2, nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0, utilidadCausada: 86773482 },
      { id: 3, nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0, utilidadCausada: 33374416 },
@@ -1669,7 +1705,6 @@ window.runInitialMigration = async (silent = false) => {
      { id: 5, nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0, utilidadCausada: 4316335 },
      { id: 6, nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0, utilidadCausada: 3782438 }].forEach(s => ops.push({ colName: 'socios', id: s.id, data: s }));
 
-    // 3. Viajes (Datos Reales extraídos de "Viajes .csv", "Sheet6.csv" y "Utilidades mensual .csv")
     [{ id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, utilidadBruta: 37849000, cartera: 12411000, ingresoRecaudado: 54545000, observaciones: 'Madera bajada Satinga', clientesAsociados: 'Oscar, Pepe', productos: 'Madera Aserrada', pagoFlete: 54545000, pagoCargue: 2000000 },
      { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, utilidadBruta: 28100000, cartera: 11084000, ingresoRecaudado: 35356300, observaciones: 'Madera de exportación', clientesAsociados: 'Oscar', productos: 'Madera Fina', pagoFlete: 35356300, pagoCargue: 1500000 },
      { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, utilidadBruta: 46260000, cartera: 0, ingresoRecaudado: 73131000, observaciones: 'Flete completo pagado', clientesAsociados: 'Konny Hospital', productos: 'Equipos Médicos', pagoFlete: 73131000, pagoCargue: 3000000 },
@@ -1677,7 +1712,6 @@ window.runInitialMigration = async (silent = false) => {
      { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', periodo: 'Dic 2025', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, utilidadBruta: 18820000, cartera: 0, ingresoRecaudado: 34820000, observaciones: 'Viaje Tumaco sin cartera', clientesAsociados: 'Modesto', productos: 'Víveres y Abarrotes', pagoFlete: 34820000, pagoCargue: 1200000 },
      { id: 6, fecha: '2026-01-15', viaje: 'Viaje #6', periodo: 'Ene 2026', ruta: 'B/tura - General', ingreso: 150000000, gastos: 42874400, utilidadBruta: 107125600, cartera: 54800000, ingresoRecaudado: 95200000, observaciones: 'Consolidado Enero 2026 (Sheet6)', clientesAsociados: 'Jhon Jairo Silva, Alex', productos: 'Equipos, Cemento, Grava', pagoFlete: 95200000, pagoCargue: 5000000 }].forEach(v => ops.push({ colName: 'viajes', id: v.id, data: v }));
 
-    // 4. Cartera Viajes (Cruzada con "Cartera Greicy .csv" y "Sheet6.csv")
     [{ id: 1, idViaje: 1, viaje: 'Viaje #1', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 12411000, fecha: '2025-10-25' },
      { id: 2, idViaje: 2, viaje: 'Viaje #2', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 11084000, fecha: '2025-11-09' },
      { id: 3, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Tubos / Grava La Tola', valor: 13000000, fecha: '2025-12-02' },
@@ -1688,13 +1722,11 @@ window.runInitialMigration = async (silent = false) => {
      { id: 8, idViaje: 6, viaje: 'Viaje #6', cliente: 'Alex', concepto: 'Tubo Proyecto', valor: 8000000, fecha: '2026-01-15' },
      { id: 9, idViaje: 6, viaje: 'Viaje #6', cliente: 'Varios', concepto: 'Saldo Enero', valor: 5500000, fecha: '2026-01-15' }].forEach(c => ops.push({ colName: 'carteraViajes', id: c.id, data: c }));
 
-    // 5. Cartera Clientes Consolidada
     [{ id: 1, cliente: 'John Jairo Silva', conceptoGeneral: 'Equipos e insumos', valorTotal: 41300000, viajesAsociados: 'Viaje #6', estado: 'Pendiente' },
      { id: 2, cliente: 'Oscar', conceptoGeneral: 'Madera bajada (Satinga)', valorTotal: 31704500, viajesAsociados: 'Viaje #1, #2, #4', estado: 'Pendiente' },
      { id: 3, cliente: 'Alex', conceptoGeneral: 'Materiales construcción Tola', valorTotal: 25900000, viajesAsociados: 'Viaje #4, #6', estado: 'Pendiente' },
      { id: 4, cliente: 'Konny Hospital', conceptoGeneral: 'Transporte Hospital', valorTotal: 1000000, viajesAsociados: 'Viaje #4', estado: 'Pendiente' }].forEach(c => ops.push({ colName: 'carteraClientes', id: c.id, data: c }));
 
-    // 6. Transacciones (Gastos de "Efectivo Barcos.csv" y "Pago Utilidades .csv")
     [{ id: 101, cuentaId: 2, tipo: 'egreso', monto: 1900000, fecha: '2026-01-26', concepto: 'Aceite Greicy', modulo: 'Mantenimiento' },
      { id: 102, cuentaId: 2, tipo: 'egreso', monto: 1000000, fecha: '2026-01-26', concepto: 'Modesto Capital Greicy', modulo: 'Tesoreria' },
      { id: 103, cuentaId: 2, tipo: 'egreso', monto: 1000000, fecha: '2026-01-25', concepto: 'Utilidades Roel Nov-Dic 2025', modulo: 'Socios' },
@@ -1709,7 +1741,6 @@ window.runInitialMigration = async (silent = false) => {
      { id: 112, cuentaId: 2, tipo: 'egreso', monto: 2000000, fecha: '2026-04-16', concepto: 'Pago Utilidades PRI', modulo: 'Socios' }
     ].forEach(t => ops.push({ colName: 'transacciones', id: t.id, data: t }));
 
-    // 7. Directorio Clientes
     [{ id: 1, nombre: 'John Jairo Silva', tipo: 'Equipos e Insumos', segmento: 'Comerciante', nit: '111111111-1', telefono: '310 000 0000', ubicacion: 'Buenaventura' },
      { id: 2, nombre: 'Oscar', tipo: 'Comerciante de Madera', segmento: 'Persona Común', nit: '222222222', telefono: '312 000 0000', ubicacion: 'Satinga' },
      { id: 3, nombre: 'Alex', tipo: 'Materiales Construcción', segmento: 'Comerciante', nit: '333333333-3', telefono: '315 000 0000', ubicacion: 'La Tola' },
@@ -1717,23 +1748,19 @@ window.runInitialMigration = async (silent = false) => {
      { id: 5, nombre: 'Modesto', tipo: 'Socio / Proveedor', segmento: 'Interno', nit: 'N/A', telefono: '320 000 0000', ubicacion: 'Tumaco' }].forEach(c => ops.push({ colName: 'clientesDir', id: c.id, data: c }));
 
     await window.dbHelper.saveBatch(ops);
-    if (!silent) alert("✅ Extracción exhaustiva de Datos de Excel completada.\nSe han sincronizado en Firestore:\n- Socios e Inversiones Reales\n- 6 Viajes (Octubre a Enero)\n- Cartera Detallada (Jhon Jairo, Oscar, Alex...)\n- Transacciones de Efectivo Barcos y Pagos de Utilidades.");
+    if (!silent) App.showAlert("✅ Extracción exhaustiva de Datos de Excel completada.\nSe han sincronizado en Firestore:\n- Socios e Inversiones Reales\n- 6 Viajes (Octubre a Enero)\n- Cartera Detallada (Jhon Jairo, Oscar, Alex...)\n- Transacciones de Efectivo Barcos y Pagos de Utilidades.");
     App.render();
 };
 
-// Inicialización del Sistema
 window.onload = () => {
     window.App.applyTheme();
     window.App.render();
     
-    // Actualizar UI al recuperar o perder conexión
     window.addEventListener('online', () => window.App.render());
     window.addEventListener('offline', () => window.App.render());
 
-    // Conexión a Firebase: Ahora protege tus datos iniciales si la nube está vacía
     if (window.isFirebaseReady) {
         
-        // Módulo Asíncrono de Inyección de Token
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -1746,26 +1773,23 @@ window.onload = () => {
             }
         };
 
-        // Ejecutar Handshake y luego activar Listeners
         initAuth().then(() => {
             onAuthStateChanged(auth, async (user) => {
                 if (user) {
                     currentUser = user;
                     
-                    // 1. AUTO-INYECCIÓN (SEEDING) AL INICIAR SESIÓN POR PRIMERA VEZ
                     const sysRef = doc(db, 'artifacts', appIdStr, 'public', 'data', '_system', 'metadata');
                     try {
                         const sysSnap = await getDoc(sysRef);
                         if (!sysSnap.exists()) {
                             console.log("🚀 Base de datos inicial en blanco. Inyectando configuración por defecto automáticamente...");
-                            await window.runInitialMigration(true); // true = Modo silencioso
+                            await window.runInitialMigration(true);
                             await setDoc(sysRef, { initialized: true, createdAt: new Date().toISOString() });
                         }
                     } catch (e) {
                         console.warn("Validación de primer inicio omitida por modo Offline total.");
                     }
 
-                    // 2. Activar Listeners con caché integrada
                     window.activeFirebaseListeners.forEach(unsub => unsub()); 
                     window.activeFirebaseListeners = [];
 
@@ -1780,10 +1804,8 @@ window.onload = () => {
                                 window.App.state[col] = data; 
                                 window.hasLoadedFromCloud[col] = true;
                             } else if (window.hasLoadedFromCloud[col]) {
-                                // Si ya se había sincronizado antes y ahora llega vacío, es porque borraste la base de datos a propósito.
                                 window.App.state[col] = []; 
                             }
-                            // Si data.length es 0 pero NUNCA ha cargado (nube virgen), simplemente IGNORAMOS el snapshot.
                             
                             window.App.render(); 
                         }, (error) => {
