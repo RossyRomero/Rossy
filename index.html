@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Don Sebe Version 1.1</title>
+    <title>Don Sebe Version 1.2</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -203,11 +203,13 @@ const App = {
         
         selectedViaje: null, selectedCliente: null, selectedSocio: null,
         isAddViajeOpen: false, isAddClienteOpen: false, isAddNominaOpen: false, isAddSocioOpen: false, isTransferOpen: false, isAddCuentaOpen: false, isAddTransaccionOpen: false,
-        editingViajeId: null, editingClienteId: null, editingSocioId: null, editingCuentaId: null,
+        isAddUsuarioOpen: false, // NUEVO: Estado del modal de usuarios
+        editingViajeId: null, editingClienteId: null, editingSocioId: null, editingCuentaId: null, editingUsuarioId: null,
 
         numpad: { isOpen: false, targetField: null, targetLabel: '', targetForm: 'viaje', value: '0' },
 
         formTemp: {
+            usuario: { nombre: '', clave: '', rol: 'usuario', permisoEdicion: false, modulosVisibles: [] }, // NUEVO: Formulario Usuarios
             viaje: { modalidad: 'unico', subClientes: [{ cliente: '', flete: '', abono: '' }], fecha: '', ruta: '', observaciones: '', productos: '', clientesAsociados: '', ingreso: 0, gastos: 0, cartera: 0, pagoFlete: 0, pagoCargue: 0, cuentaIngresoId: '', cuentaEgresoId: '' },
             pagoCartera: { idCarteraViaje: null, cliente: '', viaje: '', valorDeuda: 0, montoPagar: 0, cuentaId: '', fecha: '' },
             cliente: { nombre: '', nit: '', segmento: 'Persona Común', tipo: 'General', telefono: '', ubicacion: '' },
@@ -221,10 +223,10 @@ const App = {
 
         config: {
             pdfIncludes: { balance: true, resultados: true, flujo: true, patrimonio: true, socios: true },
-            ui: JSON.parse(localStorage.getItem('donsebe_ui_config')) || { theme: 'moderno' }
+            ui: JSON.parse(localStorage.getItem('donsebe_ui_config')) || { theme: 'moderno', primary: '#2563eb', bg: '#f8fafc', font: 'system-ui, sans-serif' }
         },
 
-        cuentas: [], transacciones: [], viajes: [], carteraViajes: [], carteraClientes: [], clientesDir: [], socios: [], pagosNomina: [],
+        cuentas: [], transacciones: [], viajes: [], carteraViajes: [], carteraClientes: [], clientesDir: [], socios: [], pagosNomina: [], usuarios: [],
         
         nominaBase: [
             { id: 1, cargo: 'Capitán', valorDia: 190000, diasDefault: 5 }, { id: 2, cargo: 'Marinero 1', valorDia: 80000, diasDefault: 5 },
@@ -251,7 +253,7 @@ const App = {
     // Validador Anti-Flicker: Protege al usuario de redibujos de pantalla mientras usa formularios
     isAnyModalOpen: () => {
         const s = App.state;
-        return s.isAddViajeOpen || s.isAddClienteOpen || s.isAddNominaOpen || s.isAddSocioOpen || s.isTransferOpen || s.isAddCuentaOpen || s.isAddTransaccionOpen || s.isPagoCarteraOpen || s.numpad.isOpen || s.alertMsg !== null;
+        return s.isAddViajeOpen || s.isAddClienteOpen || s.isAddNominaOpen || s.isAddSocioOpen || s.isTransferOpen || s.isAddCuentaOpen || s.isAddTransaccionOpen || s.isPagoCarteraOpen || s.isAddUsuarioOpen || s.numpad.isOpen || s.alertMsg !== null;
     },
 
     // MÓDULO DE ALERTAS CUSTOMIZADAS (Remplaza a los 'alert' nativos prohibidos)
@@ -266,7 +268,7 @@ const App = {
     },
     exportFullBackup: () => {
         const s = App.state;
-        const data = { cuentas: s.cuentas, transacciones: s.transacciones, viajes: s.viajes, carteraViajes: s.carteraViajes, carteraClientes: s.carteraClientes, clientesDir: s.clientesDir, socios: s.socios, pagosNomina: s.pagosNomina, timestamp: new Date().toISOString() };
+        const data = { cuentas: s.cuentas, transacciones: s.transacciones, viajes: s.viajes, carteraViajes: s.carteraViajes, carteraClientes: s.carteraClientes, clientesDir: s.clientesDir, socios: s.socios, pagosNomina: s.pagosNomina, usuarios: s.usuarios, timestamp: new Date().toISOString() };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement("a");
@@ -285,22 +287,35 @@ const App = {
         reader.onload = async (event) => {
             try {
                 const data = JSON.parse(event.target.result);
-                if (!data.viajes || !data.cuentas) throw new Error("Estructura de Backup Inválida");
+                if (!data || typeof data !== 'object') throw new Error("El archivo no es un objeto JSON válido");
                 
                 App.showAlert("⏳ Inicializando restauración desde copia de seguridad. Por favor, no cierres la aplicación.");
                 
-                const cols = ['cuentas', 'transacciones', 'viajes', 'carteraViajes', 'carteraClientes', 'clientesDir', 'socios', 'pagosNomina'];
+                const cols = ['cuentas', 'transacciones', 'viajes', 'carteraViajes', 'carteraClientes', 'clientesDir', 'socios', 'pagosNomina', 'usuarios'];
                 const batchOps = [];
+                let registrosValidos = 0;
                 
                 cols.forEach(col => {
-                    if (data[col]) { data[col].forEach(item => { batchOps.push({ colName: col, id: item.id, data: item }); }); }
+                    if (data[col] && Array.isArray(data[col])) { 
+                        data[col].forEach(item => { 
+                            if (item && item.id) {
+                                batchOps.push({ colName: col, id: item.id, data: item }); 
+                                registrosValidos++;
+                            }
+                        }); 
+                    }
                 });
                 
+                if (registrosValidos === 0) {
+                    App.showAlert("⚠️ El archivo cargado es válido pero no contiene registros compatibles para Don Sebe.");
+                    return;
+                }
+
                 await window.dbHelper.saveBatch(batchOps);
-                App.showAlert("✅ Restauración y Carga Manual completada con éxito. Toda la base de datos se ha sincronizado.");
+                App.showAlert(`✅ Restauración y Carga Manual completada con éxito. Se sincronizaron ${registrosValidos} registros con la nube.`);
             } catch (err) {
                 console.error(err);
-                App.showAlert("❌ Error al leer el archivo. Asegúrate de que subiste un archivo .json válido de Don Sebe.");
+                App.showAlert(`❌ Error al leer el archivo: ${err.message}. Asegúrate de subir un archivo .json válido de Don Sebe.`);
             }
             e.target.value = '';
         };
@@ -325,7 +340,7 @@ const App = {
     setFilterVal: (key, val) => { App.state[key] = val; App.render(); },
     togglePdfConfig: (key) => { App.state.config.pdfIncludes[key] = !App.state.config.pdfIncludes[key]; App.render(); },
     
-    // MOTOR DE TEMATIZACIÓN ESTRUCTURAL
+    // MOTOR DE TEMATIZACIÓN ESTRUCTURAL Y VISUAL (UI/UX)
     setUIConfig: (key, val) => { 
         App.state.config.ui[key] = val; 
         localStorage.setItem('donsebe_ui_config', JSON.stringify(App.state.config.ui));
@@ -333,32 +348,53 @@ const App = {
         App.render(); 
     },
     applyTheme: () => {
-        const ui = App.state.config.ui; const root = document.documentElement;
+        const ui = App.state.config.ui; 
+        if(!ui.primary) ui.primary = '#2563eb';
+        if(!ui.bg) ui.bg = '#f8fafc';
+        if(!ui.font) ui.font = 'system-ui, sans-serif';
+
+        const root = document.documentElement;
         let styleTag = document.getElementById('dynamic-theme');
         if(!styleTag) { styleTag = document.createElement('style'); styleTag.id = 'dynamic-theme'; document.head.appendChild(styleTag); }
         
-        let css = '';
+        let css = `:root { --color-primary: ${ui.primary}; --bg-main: ${ui.bg}; --font-main: ${ui.font}; }
+        body { font-family: var(--font-main) !important; background-color: var(--bg-main) !important; }
+        
+        /* Motor de Sustitución de Color Primario (Accent Override) */
+        .text-blue-600, .text-indigo-600, .group-hover\\:text-blue-600:hover, .group-hover\\:text-indigo-600:hover { color: var(--color-primary) !important; }
+        .bg-blue-600, .bg-indigo-600, .bg-slate-900 { background-color: var(--color-primary) !important; }
+        .border-blue-600, .border-indigo-600, .border-blue-500, .focus\\:border-blue-500:focus { border-color: var(--color-primary) !important; }
+        .hover\\:bg-blue-700:hover, .hover\\:bg-indigo-700:hover, .hover\\:bg-slate-800:hover { background-color: var(--color-primary) !important; filter: brightness(0.85); }
+        `;
         
         if (ui.theme === 'minimalista') {
-            // Tema Minimalista: Destruye curvas y sombras. Bordes limpios y sólidos.
+            css += `\n.rounded-2xl, .rounded-xl, .rounded-lg, .rounded-full, .rounded-md, .rounded { border-radius: 0px !important; }\n.shadow-sm, .shadow-md, .shadow-lg, .shadow-2xl { box-shadow: none !important; }\n.border { border-color: #cbd5e1 !important; }`;
+        } else if (ui.theme === 'compacto') {
+            css += `\n.p-4, .p-5, .p-6, .p-8 { padding: 0.75rem !important; }\n.space-y-6 > * + * { margin-top: 0.75rem !important; }\n.text-sm { font-size: 0.70rem !important; }\n.text-base { font-size: 0.80rem !important; }\n.text-lg { font-size: 0.90rem !important; }\n.text-xl { font-size: 1rem !important; }\n.text-2xl { font-size: 1.15rem !important; }\nth, td { padding: 0.5rem !important; }\n.gap-6, .gap-4 { gap: 0.5rem !important; }`;
+        }
+
+        /* Motor de Renderizado Dark Mode (Sobrescritura Agresiva de Nodos) */
+        if (ui.bg === '#0f172a' || ui.bg === '#171717') {
             css += `
-                .rounded-2xl, .rounded-xl, .rounded-lg, .rounded-full, .rounded-md, .rounded { border-radius: 0px !important; }
-                .shadow-sm, .shadow-md, .shadow-lg, .shadow-2xl { box-shadow: none !important; }
-                .border { border-color: #cbd5e1 !important; }
-            `;
-        } 
-        else if (ui.theme === 'compacto') {
-            // Tema Compacto: Reduce espacios vacíos, encoge márgenes y fuentes para analistas de datos.
-            css += `
-                .p-4, .p-5, .p-6, .p-8 { padding: 0.75rem !important; }
-                .space-y-6 > * + * { margin-top: 0.75rem !important; }
-                .text-sm { font-size: 0.70rem !important; }
-                .text-base { font-size: 0.80rem !important; }
-                .text-lg { font-size: 0.90rem !important; }
-                .text-xl { font-size: 1rem !important; }
-                .text-2xl { font-size: 1.15rem !important; }
-                th, td { padding: 0.5rem !important; }
-                .gap-6, .gap-4 { gap: 0.5rem !important; }
+            main, header, .bg-white, .bg-slate-50, .modal-bg { background-color: var(--bg-main) !important; border-color: #1e293b !important; }
+            body, h1, h2, h3, h4, th, div.font-black, span.font-bold, p.font-bold, label, span { color: #f1f5f9 !important; }
+            p.text-slate-500, p.text-slate-600, td, span.text-slate-500 { color: #94a3b8 !important; }
+            .text-slate-800, .text-slate-700 { color: #f8fafc !important; }
+            .border-slate-100, .border-slate-200, .border-slate-300, .border { border-color: #334155 !important; }
+            .bg-slate-100, .bg-slate-200, .bg-slate-800 { background-color: #1e293b !important; color: #f8fafc !important; }
+            input, select, textarea, datalist { background-color: #0f172a !important; color: #f8fafc !important; border-color: #475569 !important; }
+            table thead tr, table th { background-color: #1e293b !important; color: #f8fafc !important; border-bottom-color: #334155 !important; }
+            table tbody tr:hover { background-color: #1e293b !important; }
+            .shadow-sm, .shadow-md, .shadow-lg, .shadow-2xl { box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.7), 0 4px 6px -2px rgba(0, 0, 0, 0.5) !important; }
+            
+            /* Preservar colores semánticos de finanzas (Verde, Rojo, Naranja) */
+            .text-green-600, .text-green-700 { color: #34d399 !important; }
+            .text-red-500, .text-red-600, .text-red-700 { color: #f87171 !important; }
+            .text-orange-500, .text-orange-600, .text-orange-700 { color: #fbbf24 !important; }
+            .bg-green-50 { background-color: rgba(52, 211, 153, 0.1) !important; border-color: rgba(52, 211, 153, 0.2) !important; }
+            .bg-red-50 { background-color: rgba(248, 113, 113, 0.1) !important; border-color: rgba(248, 113, 113, 0.2) !important; }
+            .bg-orange-50 { background-color: rgba(251, 191, 36, 0.1) !important; border-color: rgba(251, 191, 36, 0.2) !important; }
+            .bg-blue-50 { background-color: rgba(59, 130, 246, 0.1) !important; border-color: rgba(59, 130, 246, 0.2) !important; }
             `;
         }
 
@@ -475,6 +511,49 @@ const App = {
         else App.render();
     },
     closeNumpad: () => { App.state.numpad.isOpen = false; App.render(); },
+
+    // CORE GESTIÓN DE USUARIOS Y ROLES (RBAC)
+    openAddUsuario: () => {
+        App.state.editingUsuarioId = null;
+        App.state.formTemp.usuario = { nombre: '', clave: '', rol: 'usuario', permisoEdicion: false, modulosVisibles: App.navItems.map(i => i.id) };
+        App.state.isAddUsuarioOpen = true;
+        App.render();
+    },
+    editUsuario: (id) => {
+        const u = App.state.usuarios.find(x => x.id === id);
+        if (!u) return;
+        App.state.editingUsuarioId = id;
+        App.state.formTemp.usuario = { ...u };
+        App.state.isAddUsuarioOpen = true;
+        App.render();
+    },
+    deleteUsuario: async (id, btnElement) => {
+        if(btnElement.innerText === 'Eliminar') {
+            btnElement.innerText = 'Confirmar Borrado'; 
+            btnElement.classList.replace('text-red-600', 'text-white');
+            btnElement.classList.add('bg-red-600', 'px-2', 'py-1', 'rounded');
+        } else {
+            window.dbHelper.remove('usuarios', id);
+            App.closeModals();
+        }
+    },
+    submitUsuario: async (e) => {
+        e.preventDefault(); const f = e.target;
+        const modulos = [];
+        App.navItems.forEach(item => {
+            if (f[`mod_${item.id}`] && f[`mod_${item.id}`].checked) modulos.push(item.id);
+        });
+        const data = {
+            nombre: f.nombre.value,
+            clave: f.clave.value,
+            rol: f.rol.value,
+            permisoEdicion: f.permisoEdicion.checked,
+            modulosVisibles: modulos
+        };
+        const newId = App.state.editingUsuarioId || Date.now();
+        window.dbHelper.save('usuarios', newId, { id: newId, ...data });
+        App.closeModals();
+    },
 
     // CORE TESORERÍA Y FINANZAS
     getSaldoCuenta: (cuentaId) => {
@@ -671,9 +750,9 @@ const App = {
         App.state.selectedViaje = null; App.state.selectedCliente = null; App.state.selectedSocio = null;
         App.state.isAddViajeOpen = false; App.state.isAddClienteOpen = false; App.state.isAddNominaOpen = false;
         App.state.isAddSocioOpen = false; App.state.isTransferOpen = false; App.state.isAddCuentaOpen = false; App.state.isAddTransaccionOpen = false;
-        App.state.isPagoCarteraOpen = false;
+        App.state.isPagoCarteraOpen = false; App.state.isAddUsuarioOpen = false;
         App.state.numpad.isOpen = false;
-        App.state.editingViajeId = null; App.state.editingClienteId = null; App.state.editingSocioId = null; App.state.editingCuentaId = null;
+        App.state.editingViajeId = null; App.state.editingClienteId = null; App.state.editingSocioId = null; App.state.editingCuentaId = null; App.state.editingUsuarioId = null;
         
         App.state.formTemp.viaje = { modalidad: 'unico', subClientes: [{ cliente: '', flete: '', abono: '' }], fecha: '', ruta: '', observaciones: '', productos: '', clientesAsociados: '', ingreso: 0, gastos: 0, cartera: 0, pagoFlete: 0, pagoCargue: 0, cuentaIngresoId: '', cuentaEgresoId: '' };
         App.state.formTemp.pagoCartera = { idCarteraViaje: null, cliente: '', viaje: '', valorDeuda: 0, montoPagar: 0, cuentaId: '', fecha: '' };
@@ -682,6 +761,7 @@ const App = {
         App.state.formTemp.transferencia = { vendedorId: '', compradorId: '', porcentaje: 0 };
         App.state.formTemp.cuenta = { nombre: '', tipo: 'banco', saldoInicial: 0, numero: '' };
         App.state.formTemp.transaccion = { tipo: 'ingreso', monto: 0, fecha: new Date().toISOString().split('T')[0], concepto: '', cuentaId: '', cuentaDestinoId: '' };
+        App.state.formTemp.usuario = { nombre: '', clave: '', rol: 'usuario', permisoEdicion: false, modulosVisibles: [] };
         App.render(); 
     },
 
@@ -1567,6 +1647,51 @@ const App = {
                 <div><h2 class="text-2xl font-bold flex items-center"><i data-lucide="settings" class="mr-2 text-blue-600 w-6 h-6"></i> Configuración del Sistema</h2><p class="text-sm text-slate-500">Ajustes de interfaz y preferencias de exportación</p></div>
             </div>
 
+            <!-- MATRIZ DE USUARIOS (RBAC) -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl mt-6 border-l-4 border-l-indigo-500">
+                <div class="flex justify-between items-center mb-6">
+                    <div>
+                        <h3 class="font-bold text-lg text-slate-800 flex items-center"><i data-lucide="users-cog" class="w-5 h-5 mr-2 text-indigo-600"></i> Gestión de Accesos y Usuarios</h3>
+                        <p class="text-xs text-slate-500">Controle quién puede ver o alterar la estructura financiera de la aplicación.</p>
+                    </div>
+                    <button onclick="window.App.openAddUsuario()" class="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-700 shadow-sm flex items-center transition-colors">
+                        <i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Usuario
+                    </button>
+                </div>
+                <div class="w-full overflow-x-auto table-scroll">
+                    <table class="w-full text-left text-xs border-collapse">
+                        <thead>
+                            <tr class="bg-slate-50 border-b text-slate-500 uppercase font-bold">
+                                <th class="p-3 border-r border-slate-200">Nombre / Usuario</th>
+                                <th class="p-3 border-r border-slate-200">Rol</th>
+                                <th class="p-3 text-center border-r border-slate-200">Permiso Edición</th>
+                                <th class="p-3 border-r border-slate-200">Visibilidad</th>
+                                <th class="p-3 text-right">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${App.state.usuarios.length === 0 ? '<tr><td colspan="5" class="p-4 text-center text-slate-400 font-medium">No hay perfiles de usuario registrados.</td></tr>' : ''}
+                            ${App.state.usuarios.map(u => `
+                                <tr class="border-b hover:bg-slate-50 transition-colors">
+                                    <td class="p-3 font-bold text-slate-800 border-r border-slate-100">${u.nombre}</td>
+                                    <td class="p-3 capitalize text-slate-500 border-r border-slate-100">
+                                        <span class="px-2 py-1 rounded text-[10px] font-black uppercase ${u.rol === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}">${u.rol}</span>
+                                    </td>
+                                    <td class="p-3 text-center border-r border-slate-100">
+                                        ${u.permisoEdicion ? '<span class="text-green-600 font-bold bg-green-50 px-2 py-1 rounded border border-green-200">SÍ</span>' : '<span class="text-red-500 font-bold bg-red-50 px-2 py-1 rounded border border-red-200">NO</span>'}
+                                    </td>
+                                    <td class="p-3 text-[10px] text-slate-500 font-bold border-r border-slate-100">${u.modulosVisibles.length} Módulos Asignados</td>
+                                    <td class="p-3 text-right">
+                                        <button onclick="window.App.editUsuario(${u.id})" class="text-blue-600 font-bold hover:underline mr-3">Editar</button>
+                                        <button onclick="window.App.deleteUsuario(${u.id}, this)" class="text-red-600 font-bold hover:underline">Eliminar</button>
+                                    </td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- Nuevo Módulo de Backups Locales Integrado -->
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl mt-6">
                 <h3 class="font-bold text-lg text-slate-800 mb-2 border-b pb-3 flex items-center"><i data-lucide="database-backup" class="w-5 h-5 mr-2 text-blue-600"></i> Copias de Seguridad (Backups)</h3>
@@ -1610,24 +1735,77 @@ const App = {
                 <div class="flex items-center space-x-3 mb-4 relative z-10"><div class="w-3 h-3 rounded-full ${navigator.onLine ? 'bg-green-500 animate-pulse' : 'bg-orange-500'}"></div><span class="text-sm font-bold text-blue-900">${navigator.onLine ? 'Sincronización en Tiempo Real Activa' : 'Modo Operación Local (Sin Internet)'}</span></div>
             </div>
             
-            <!-- NUEVO MÓDULO DE TEMATIZACIÓN (UI) -->
+            <!-- MÓDULO DE PERSONALIZACIÓN VISUAL AVANZADA (UI/UX) -->
             <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl mt-6">
-                <h3 class="font-bold text-lg text-slate-800 mb-2 border-b pb-3 flex items-center"><i data-lucide="palette" class="w-5 h-5 mr-2 text-slate-400"></i> Temas e Interfaz Visual</h3>
-                <p class="text-xs text-slate-500 mb-5">Modifica la disposición estructural y densidad visual de la aplicación. Esto no altera la información, solo maximiza y reubica la presentación en pantalla.</p>
+                <h3 class="font-bold text-lg text-slate-800 mb-2 border-b pb-3 flex items-center"><i data-lucide="palette" class="w-5 h-5 mr-2 text-slate-400"></i> Personalización Visual y Experiencia (UI)</h3>
+                <p class="text-xs text-slate-500 mb-5">Configure a fondo la presentación visual del sistema. Los cambios se guardarán automáticamente en su dispositivo, afectando densidades, colores y fuentes.</p>
                 
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <button onclick="App.setUIConfig('theme', 'moderno')" class="p-4 border-2 rounded-xl text-left transition-all outline-none ${ui.theme==='moderno'||!ui.theme?'border-blue-500 bg-blue-50/50 shadow-inner':'border-slate-200 hover:border-blue-300'}">
-                        <div class="flex items-center mb-2"><i data-lucide="layout" class="w-4 h-4 mr-2 ${ui.theme==='moderno'||!ui.theme?'text-blue-600':'text-slate-400'}"></i><p class="font-bold text-slate-800">Moderno</p></div>
-                        <p class="text-[10px] text-slate-500">Bordes redondeados, sombras suaves y espaciado balanceado (Defecto).</p>
-                    </button>
-                    <button onclick="App.setUIConfig('theme', 'minimalista')" class="p-4 border-2 rounded-xl text-left transition-all outline-none ${ui.theme==='minimalista'?'border-blue-500 bg-blue-50/50 shadow-inner':'border-slate-200 hover:border-blue-300'}">
-                        <div class="flex items-center mb-2"><i data-lucide="square" class="w-4 h-4 mr-2 ${ui.theme==='minimalista'?'text-blue-600':'text-slate-400'}"></i><p class="font-bold text-slate-800">Minimalista</p></div>
-                        <p class="text-[10px] text-slate-500">Diseño estricto y plano. Bordes rectos y eliminación total de sombras.</p>
-                    </button>
-                    <button onclick="App.setUIConfig('theme', 'compacto')" class="p-4 border-2 rounded-xl text-left transition-all outline-none ${ui.theme==='compacto'?'border-blue-500 bg-blue-50/50 shadow-inner':'border-slate-200 hover:border-blue-300'}">
-                        <div class="flex items-center mb-2"><i data-lucide="minimize" class="w-4 h-4 mr-2 ${ui.theme==='compacto'?'text-blue-600':'text-slate-400'}"></i><p class="font-bold text-slate-800">Compacto</p></div>
-                        <p class="text-[10px] text-slate-500">Alta densidad. Reduce márgenes y achica fuentes. Ideal para analistas.</p>
-                    </button>
+                <div class="space-y-6">
+                    <!-- 1. Estructura y Densidad -->
+                    <div>
+                        <h4 class="font-bold text-xs text-slate-700 uppercase mb-3">1. Estructura y Densidad (Layout)</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <button onclick="window.App.setUIConfig('theme', 'moderno')" class="p-3 border-2 rounded-xl text-left transition-all outline-none ${ui.theme==='moderno'||!ui.theme?'border-blue-500 bg-blue-50/50':'border-slate-200 hover:border-slate-300'}">
+                                <div class="flex items-center mb-1"><i data-lucide="layout" class="w-4 h-4 mr-2 ${ui.theme==='moderno'||!ui.theme?'text-blue-600':'text-slate-400'}"></i><p class="font-bold text-slate-800 text-sm">Moderno</p></div>
+                                <p class="text-[10px] text-slate-500 leading-tight">Curvas suaves y espaciado balanceado (Defecto).</p>
+                            </button>
+                            <button onclick="window.App.setUIConfig('theme', 'minimalista')" class="p-3 border-2 rounded-xl text-left transition-all outline-none ${ui.theme==='minimalista'?'border-blue-500 bg-blue-50/50':'border-slate-200 hover:border-slate-300'}">
+                                <div class="flex items-center mb-1"><i data-lucide="square" class="w-4 h-4 mr-2 ${ui.theme==='minimalista'?'text-blue-600':'text-slate-400'}"></i><p class="font-bold text-slate-800 text-sm">Minimalista</p></div>
+                                <p class="text-[10px] text-slate-500 leading-tight">Bordes rectos y eliminación de sombras.</p>
+                            </button>
+                            <button onclick="window.App.setUIConfig('theme', 'compacto')" class="p-3 border-2 rounded-xl text-left transition-all outline-none ${ui.theme==='compacto'?'border-blue-500 bg-blue-50/50':'border-slate-200 hover:border-slate-300'}">
+                                <div class="flex items-center mb-1"><i data-lucide="minimize" class="w-4 h-4 mr-2 ${ui.theme==='compacto'?'text-blue-600':'text-slate-400'}"></i><p class="font-bold text-slate-800 text-sm">Compacto</p></div>
+                                <p class="text-[10px] text-slate-500 leading-tight">Alta densidad de datos. Letra y márgenes pequeños.</p>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 2. Paleta de Colores Principales -->
+                    <div>
+                        <h4 class="font-bold text-xs text-slate-700 uppercase mb-3">2. Color Principal (Acentos)</h4>
+                        <div class="flex flex-wrap gap-3 items-center">
+                            <button onclick="window.App.setUIConfig('primary', '#2563eb')" class="w-8 h-8 rounded-full bg-blue-600 shadow-sm border-2 ${ui.primary==='#2563eb'||!ui.primary?'border-slate-800 scale-110':'border-transparent hover:scale-105'} transition-all" title="Azul Corporativo"></button>
+                            <button onclick="window.App.setUIConfig('primary', '#10b981')" class="w-8 h-8 rounded-full bg-emerald-500 shadow-sm border-2 ${ui.primary==='#10b981'?'border-slate-800 scale-110':'border-transparent hover:scale-105'} transition-all" title="Esmeralda"></button>
+                            <button onclick="window.App.setUIConfig('primary', '#8b5cf6')" class="w-8 h-8 rounded-full bg-violet-500 shadow-sm border-2 ${ui.primary==='#8b5cf6'?'border-slate-800 scale-110':'border-transparent hover:scale-105'} transition-all" title="Violeta"></button>
+                            <button onclick="window.App.setUIConfig('primary', '#e11d48')" class="w-8 h-8 rounded-full bg-rose-600 shadow-sm border-2 ${ui.primary==='#e11d48'?'border-slate-800 scale-110':'border-transparent hover:scale-105'} transition-all" title="Rosa"></button>
+                            <button onclick="window.App.setUIConfig('primary', '#d97706')" class="w-8 h-8 rounded-full bg-amber-600 shadow-sm border-2 ${ui.primary==='#d97706'?'border-slate-800 scale-110':'border-transparent hover:scale-105'} transition-all" title="Ámbar"></button>
+                            <button onclick="window.App.setUIConfig('primary', '#0f172a')" class="w-8 h-8 rounded-full bg-slate-900 shadow-sm border-2 ${ui.primary==='#0f172a'?'border-slate-400 scale-110':'border-transparent hover:scale-105'} transition-all" title="Ejecutivo Oscuro"></button>
+                            
+                            <div class="h-6 w-px bg-slate-200 mx-1"></div>
+                            
+                            <div class="flex items-center space-x-2 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                                <input type="color" id="customColorPicker" value="${ui.primary || '#2563eb'}" onchange="window.App.setUIConfig('primary', this.value)" class="w-6 h-6 p-0 border-0 rounded cursor-pointer bg-transparent">
+                                <label for="customColorPicker" class="text-[10px] font-bold text-slate-600 cursor-pointer pr-2">Personalizado</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. Fondos y Modo Oscuro -->
+                    <div>
+                        <h4 class="font-bold text-xs text-slate-700 uppercase mb-3">3. Fondo y Entorno (Modo Color)</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <button onclick="window.App.setUIConfig('bg', '#f8fafc')" class="p-3 border-2 rounded-xl text-left transition-all outline-none ${ui.bg==='#f8fafc'||!ui.bg?'border-blue-500 bg-blue-50/50':'border-slate-200 hover:border-slate-300'}">
+                                <div class="flex items-center mb-1"><i data-lucide="sun" class="w-4 h-4 mr-2 ${ui.bg==='#f8fafc'||!ui.bg?'text-blue-600':'text-slate-400'}"></i><p class="font-bold text-slate-800 text-sm">Claro (Light)</p></div>
+                            </button>
+                            <button onclick="window.App.setUIConfig('bg', '#f1f5f9')" class="p-3 border-2 rounded-xl text-left transition-all outline-none ${ui.bg==='#f1f5f9'?'border-blue-500 bg-blue-50/50':'border-slate-200 hover:border-slate-300'}">
+                                <div class="flex items-center mb-1"><i data-lucide="cloud" class="w-4 h-4 mr-2 ${ui.bg==='#f1f5f9'?'text-blue-600':'text-slate-400'}"></i><p class="font-bold text-slate-800 text-sm">Gris (Dim)</p></div>
+                            </button>
+                            <button onclick="window.App.setUIConfig('bg', '#0f172a')" class="p-3 border-2 rounded-xl text-left transition-all outline-none bg-slate-900 ${ui.bg==='#0f172a'?'border-blue-400 shadow-lg':'border-transparent hover:border-slate-700'}">
+                                <div class="flex items-center mb-1"><i data-lucide="moon" class="w-4 h-4 mr-2 ${ui.bg==='#0f172a'?'text-blue-400':'text-slate-400'}"></i><p class="font-bold text-white text-sm">Oscuro (Dark)</p></div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 4. Tipografía -->
+                    <div>
+                        <h4 class="font-bold text-xs text-slate-700 uppercase mb-3">4. Estilo Tipográfico (Fuente)</h4>
+                        <select onchange="window.App.setUIConfig('font', this.value)" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm font-bold text-slate-700 outline-none focus:border-blue-500 bg-white cursor-pointer">
+                            <option value="system-ui, sans-serif" ${ui.font==='system-ui, sans-serif'||!ui.font?'selected':''}>San Francisco / Inter (Nativa y Limpia)</option>
+                            <option value="'Georgia', serif" style="font-family: 'Georgia', serif;" ${ui.font==="'Georgia', serif"?'selected':''}>Georgia / Serif (Clásica y Formal)</option>
+                            <option value="'Courier New', monospace" style="font-family: 'Courier New', monospace;" ${ui.font==="'Courier New', monospace"?'selected':''}>Courier New (Monospace / Código y Datos)</option>
+                            <option value="'Trebuchet MS', sans-serif" style="font-family: 'Trebuchet MS', sans-serif;" ${ui.font==="'Trebuchet MS', sans-serif"?'selected':''}>Trebuchet MS (Técnica)</option>
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -2120,7 +2298,7 @@ const App = {
 
         // Modal de Alertas Personalizadas (Reemplaza alert nativo)
         if (s.alertMsg) {
-            h += `<div class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 print:hidden" onclick="window.closeAlert()"><div class="bg-white p-6 rounded-2xl max-w-sm w-full shadow-2xl animate-scale-in text-center border border-slate-200" onclick="event.stopPropagation()"><div class="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="alert-triangle" class="w-6 h-6"></i></div><p class="text-slate-800 font-bold mb-6 leading-relaxed">${s.alertMsg}</p><button onclick="window.closeAlert()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl font-bold w-full hover:bg-slate-800 transition-colors shadow-md">Entendido</button></div></div>`;
+            h += `<div class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 print:hidden" onclick="window.App.closeAlert()"><div class="bg-white p-6 rounded-2xl max-w-sm w-full shadow-2xl animate-scale-in text-center border border-slate-200" onclick="event.stopPropagation()"><div class="w-12 h-12 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="alert-triangle" class="w-6 h-6"></i></div><p class="text-slate-800 font-bold mb-6 leading-relaxed">${s.alertMsg}</p><button onclick="window.App.closeAlert()" class="bg-slate-900 text-white px-6 py-2.5 rounded-xl font-bold w-full hover:bg-slate-800 transition-colors shadow-md">Entendido</button></div></div>`;
         }
 
         const uniqueRutas = [...new Set(s.viajes.map(v => v.ruta).filter(Boolean))];
@@ -2450,6 +2628,45 @@ const App = {
                 <button type="submit" class="w-full bg-indigo-600 text-white font-black py-4 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition-all mt-4">Ejecutar Transferencia</button></form></div></div>`;
         }
 
+        // MODAL CREACIÓN DE USUARIO (RBAC)
+        if (s.isAddUsuarioOpen) {
+            const fUser = s.formTemp.usuario;
+            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass}">
+                <div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${s.editingUsuarioId ? 'Editar Perfil de Usuario' : 'Nuevo Perfil de Usuario'}</h3><button type="button" onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div>
+                <form onsubmit="window.App.submitUsuario(event)" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Nombre / Usuario</label><input name="nombre" type="text" value="${fUser.nombre}" placeholder="Ej: Administrador" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
+                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Contraseña</label><input name="clave" type="text" value="${fUser.clave}" placeholder="Ej: 1234" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
+                    </div>
+                    <div class="flex items-center space-x-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                        <div class="flex-1 space-y-1">
+                            <label class="text-xs font-bold text-slate-500 uppercase">Privilegio de Sistema</label>
+                            <select name="rol" class="w-full bg-white border border-slate-300 p-2 rounded-lg font-bold text-xs outline-none">
+                                <option value="usuario" ${fUser.rol==='usuario'?'selected':''}>Usuario Operador (Básico)</option>
+                                <option value="admin" ${fUser.rol==='admin'?'selected':''}>Administrador Maestro</option>
+                            </select>
+                        </div>
+                        <label class="flex items-center space-x-2 cursor-pointer mt-4">
+                            <input name="permisoEdicion" type="checkbox" ${fUser.permisoEdicion?'checked':''} class="w-5 h-5 rounded text-blue-600 border-slate-300"/>
+                            <span class="text-xs font-bold text-slate-700 leading-tight">Permitir Edición<br><span class="text-[9px] font-normal text-slate-500">(Escritura en BD)</span></span>
+                        </label>
+                    </div>
+                    <div class="space-y-2 mt-4 bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                        <label class="text-xs font-black text-slate-700 uppercase mb-2 flex items-center"><i data-lucide="eye" class="w-4 h-4 mr-2 text-blue-500"></i> Módulos Autorizados (Visibilidad)</label>
+                        <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-2">
+                            ${App.navItems.map(item => `
+                                <label class="flex items-center space-x-2 bg-white p-2 border border-slate-100 rounded-lg shadow-sm cursor-pointer hover:border-blue-300 transition-colors">
+                                    <input type="checkbox" name="mod_${item.id}" ${fUser.modulosVisibles.includes(item.id)?'checked':''} class="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-0">
+                                    <span class="text-[10px] sm:text-xs font-bold text-slate-700 flex items-center"><i data-lucide="${item.icon}" class="w-3 h-3 mr-1 text-slate-400"></i> ${item.label}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full bg-indigo-600 text-white font-black py-4 rounded-xl hover:bg-indigo-700 shadow-lg transition-colors mt-4 flex items-center justify-center"><i data-lucide="save" class="w-5 h-5 mr-2"></i> Guardar Perfil de Usuario</button>
+                </form>
+            </div></div>`;
+        }
+
         return h;
     },
 
@@ -2477,7 +2694,7 @@ const App = {
             <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden shadow-sm sticky top-0">
                 <div class="flex items-center">
                     ${App.state.activeTab !== 'dashboard' ? `<button onclick="window.App.setTab('dashboard')" class="mr-3 sm:mr-4 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
-                    <h1 onclick="window.App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> Don Sebe v1.1</h1>
+                    <h1 onclick="window.App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> Don Sebe v1.2</h1>
                 </div>
                 <div class="bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold shadow-md flex items-center transition-all min-w-[120px] justify-center">
                     ${navigator.onLine ? `<div class="w-2 h-2 bg-green-400 rounded-full mr-2 shadow-[0_0_8px_rgba(74,222,128,0.5)]"></div> En Línea (Sincronizado)` : `<div class="w-2 h-2 bg-orange-400 rounded-full mr-2"></div> Modo Local (Offline)`}
@@ -2612,6 +2829,10 @@ window.runInitialMigration = async (silent = false) => {
     // Alerta reemplazada por prompt custom no bloqueante en el futuro, por ahora retornamos silent si bloquea
     const ops = [];
 
+    // INYECCIÓN DE USUARIO ADMIN MAESTRO
+    const adminUser = { id: 1, nombre: 'Admin', clave: '1234', rol: 'admin', permisoEdicion: true, modulosVisibles: App.navItems.map(i => i.id) };
+    ops.push({ colName: 'usuarios', id: adminUser.id, data: adminUser });
+
     [{ id: 1, nombre: 'Banco Agrario Principal', tipo: 'banco', saldoInicial: 10000000, numero: '123-456-789' },
      { id: 2, nombre: 'Efectivo Barcos (Caja Fuerte)', tipo: 'caja', saldoInicial: 3731255, numero: 'Efectivo' },
      { id: 3, nombre: 'Caja Menor Operativa', tipo: 'caja_menor', saldoInicial: 1500000, numero: 'Efectivo' }].forEach(c => ops.push({ colName: 'cuentas', id: c.id, data: c }));
@@ -2716,7 +2937,8 @@ window.onload = () => {
                     window.activeFirebaseListeners.forEach(unsub => unsub()); 
                     window.activeFirebaseListeners = [];
 
-                    const colecciones = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina', 'carteraViajes', 'carteraClientes'];
+                    // NUEVO: Se agregó 'usuarios' a las colecciones sincronizadas
+                    const colecciones = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina', 'carteraViajes', 'carteraClientes', 'usuarios'];
                     
                     colecciones.forEach(col => {
                         const colRef = collection(db, 'artifacts', appIdStr, 'public', 'data', col);
