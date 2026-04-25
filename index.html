@@ -146,7 +146,7 @@ window.dbHelper = {
         const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString());
         setDoc(ref, data, { merge: true }).catch(e => console.error(`Error Sync [${colName}]:`, e));
     },
-    saveBatch: (operations) => {
+    saveBatch: async (operations) => {
         // 1. Inyección Local Inmediata (Optimistic Update)
         operations.forEach(op => {
             const col = App.state[op.colName];
@@ -156,14 +156,18 @@ window.dbHelper = {
         });
         if (!App.isAnyModalOpen()) App.render();
 
-        // 2. Delegación Transaccional a Cola de Firestore
+        // 2. Delegación Transaccional a Cola de Firestore (Chunking de 400 por límite)
         if (!window.isFirebaseReady || !currentUser) return;
-        const batch = writeBatch(db);
-        operations.forEach(op => {
-            const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
-            batch.set(ref, op.data, { merge: true });
-        });
-        batch.commit().catch(e => console.error("Error Sync [Batch]:", e));
+        const chunkSize = 400;
+        for (let i = 0; i < operations.length; i += chunkSize) {
+            const chunk = operations.slice(i, i + chunkSize);
+            const batch = writeBatch(db);
+            chunk.forEach(op => {
+                const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
+                batch.set(ref, op.data, { merge: true });
+            });
+            await batch.commit().catch(e => console.error("Error Sync [Batch Chunk]:", e));
+        }
     },
     remove: (colName, id) => {
         App.state[colName] = App.state[colName].filter(x => x.id !== id);
@@ -466,10 +470,24 @@ const App = {
                 
                 const cols = ['cuentas', 'transacciones', 'viajes', 'carteraViajes', 'carteraClientes', 'clientesDir', 'socios', 'pagosNomina', 'usuarios'];
                 const batchOps = [];
+                const deleteOps = [];
                 let registrosValidos = 0;
                 
+                // APEX: REEMPLAZO ESTRUCTURAL EXACTO (Hard Override)
                 cols.forEach(col => {
                     if (data[col] && Array.isArray(data[col])) { 
+                        // 1. Detectar IDs locales que NO están en el backup (para eliminarlos de la nube)
+                        const backupIds = data[col].map(item => item.id);
+                        App.state[col].forEach(existing => {
+                            if (!backupIds.includes(existing.id)) {
+                                deleteOps.push({ colName: col, id: existing.id });
+                            }
+                        });
+
+                        // 2. Reemplazo local instantáneo
+                        App.state[col] = [...data[col]];
+                        
+                        // 3. Preparación de matriz de subida
                         data[col].forEach(item => { 
                             if (item && item.id) {
                                 batchOps.push({ colName: col, id: item.id, data: item }); 
@@ -484,8 +502,26 @@ const App = {
                     return;
                 }
 
-                await window.dbHelper.saveBatch(batchOps);
-                App.showAlert(`✅ Restauración y Carga Manual completada con éxito. Se sincronizaron ${registrosValidos} registros con la nube.`);
+                // Renderizar inmediatamente la UI reemplazada
+                App.render();
+                
+                // DELEGAR A FIRESTORE (Chunking de 400 documentos para evitar Error 500 Firestore Limit)
+                if (window.isFirebaseReady && currentUser) {
+                    const allOps = [...batchOps, ...deleteOps];
+                    const chunkSize = 400;
+                    for (let i = 0; i < allOps.length; i += chunkSize) {
+                        const chunk = allOps.slice(i, i + chunkSize);
+                        const batch = writeBatch(db);
+                        chunk.forEach(op => {
+                            const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
+                            if (op.data) batch.set(ref, op.data); // Sobrescritura pura (sin merge) para forzar exactitud
+                            else batch.delete(ref); // Eliminación de la nube de datos posteriores al backup
+                        });
+                        await batch.commit().catch(e => console.error("Error Batch Restore:", e));
+                    }
+                }
+
+                App.showAlert(`✅ Restauración EXACTA completada con éxito.\nEl sistema ha sido revertido íntegramente a la copia de seguridad (${registrosValidos} registros procesados).`);
             } catch (err) {
                 console.error(err);
                 App.showAlert(`❌ Error al leer el archivo: ${err.message}. Asegúrate de subir un archivo .json válido de Don Sebe.`);
