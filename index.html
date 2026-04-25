@@ -110,46 +110,34 @@ try {
 
 /**
  * ==========================================
- * 2. MOTOR HÍBRIDO DE DATOS (OFFLINE FIRST)
+ * 2. MOTOR HÍBRIDO DE DATOS (SSOT - SINGLE SOURCE OF TRUTH)
  * ==========================================
+ * Refactorizado para máxima eficiencia: En lugar de mutar la interfaz manualmente y
+ * esperar a la red, delegamos la mutación 100% a Firestore. Firestore actualiza el 
+ * caché nativo instantáneamente y dispara 'onSnapshot', logrando UI en tiempo real 
+ * sin bloqueos de red ni promesas colgadas.
  */
 window.dbHelper = {
-    save: async (colName, id, data) => {
-        const idx = App.state[colName].findIndex(x => x.id === id);
-        if(idx !== -1) App.state[colName][idx] = { ...App.state[colName][idx], ...data };
-        else App.state[colName].push({ id, ...data });
-        window.App.render();
-
-        if (window.isFirebaseReady && currentUser) {
-            setDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()), data, { merge: true })
-                .catch(e => console.warn("Guardado encolado para próxima conexión...", e));
-        }
+    save: (colName, id, data) => {
+        if (!window.isFirebaseReady || !currentUser) return;
+        const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString());
+        // Ejecución NO bloqueante (Fire and forget). Confía en el caché local.
+        setDoc(ref, data, { merge: true }).catch(e => console.error(`Error Sync [${colName}]:`, e));
     },
-    saveBatch: async (operations) => {
+    saveBatch: (operations) => {
+        if (!window.isFirebaseReady || !currentUser) return;
+        const batch = writeBatch(db);
         operations.forEach(op => {
-            const idx = App.state[op.colName].findIndex(x => x.id === op.id);
-            if(idx !== -1) App.state[op.colName][idx] = { ...App.state[op.colName][idx], ...op.data };
-            else App.state[op.colName].push({ id: op.id, ...op.data });
+            const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
+            batch.set(ref, op.data, { merge: true });
         });
-        window.App.render();
-
-        if (window.isFirebaseReady && currentUser) {
-            const batch = writeBatch(db);
-            operations.forEach(op => {
-                const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
-                batch.set(ref, op.data, { merge: true });
-            });
-            batch.commit().catch(e => console.warn("Lote de operaciones encolado offline...", e));
-        }
+        // Ejecución NO bloqueante.
+        batch.commit().catch(e => console.error("Error Sync [Batch]:", e));
     },
-    remove: async (colName, id) => {
-        App.state[colName] = App.state[colName].filter(x => x.id !== id);
-        window.App.render();
-        
-        if (window.isFirebaseReady && currentUser) {
-            deleteDoc(doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString()))
-                .catch(e => console.warn("Borrado encolado para próxima conexión...", e));
-        }
+    remove: (colName, id) => {
+        if (!window.isFirebaseReady || !currentUser) return;
+        const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString());
+        deleteDoc(ref).catch(e => console.error(`Error Delete [${colName}]:`, e));
     }
 };
 
@@ -428,13 +416,13 @@ const App = {
         if (saldo > 0) { App.showAlert(`Seguridad Financiera: No puede eliminar una cuenta con saldo a favor (${formatCOP(saldo)}). Transfiera los fondos antes de borrarla.`); return; }
 
         if(btnElement.innerText === 'Eliminar Cuenta') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
-        else { await window.dbHelper.remove('cuentas', id); App.closeModals(); }
+        else { window.dbHelper.remove('cuentas', id); App.closeModals(); }
     },
     submitCuenta: async (e) => {
         e.preventDefault(); const f = e.target;
         const data = { nombre: f.nombre.value, tipo: f.tipo.value, numero: f.numero.value, saldoInicial: App.state.formTemp.cuenta.saldoInicial };
         const newId = App.state.editingCuentaId || Date.now();
-        await window.dbHelper.save('cuentas', newId, { id: newId, ...data });
+        window.dbHelper.save('cuentas', newId, { id: newId, ...data });
         App.closeModals();
     },
     
@@ -450,10 +438,10 @@ const App = {
                 { colName: 'transacciones', id: idRet, data: { id: idRet, cuentaId: cuentaOrigen, tipo: 'egreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia a #${cuentaDest} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null } },
                 { colName: 'transacciones', id: idRet + 1, data: { id: idRet + 1, cuentaId: cuentaDest, tipo: 'ingreso', monto: t.monto, fecha: f.fecha.value, concepto: `Transferencia de #${cuentaOrigen} - ${f.concepto.value}`, modulo: 'Tesoreria', referencia: null } }
             ];
-            await window.dbHelper.saveBatch(batchOps);
+            window.dbHelper.saveBatch(batchOps);
         } else {
             const newId = Date.now();
-            await window.dbHelper.save('transacciones', newId, { id: newId, cuentaId: cuentaOrigen, tipo: t.tipo, monto: t.monto, fecha: f.fecha.value, concepto: f.concepto.value, modulo: 'Tesoreria', referencia: null });
+            window.dbHelper.save('transacciones', newId, { id: newId, cuentaId: cuentaOrigen, tipo: t.tipo, monto: t.monto, fecha: f.fecha.value, concepto: f.concepto.value, modulo: 'Tesoreria', referencia: null });
         }
         App.closeModals();
     },
@@ -462,7 +450,7 @@ const App = {
     editViaje: (id) => { const v = App.state.viajes.find(v => v.id === id); if(!v) return; App.state.editingViajeId = id; App.state.formTemp.viaje = { ...v, cuentaIngresoId: '', cuentaEgresoId: '' }; App.state.selectedViaje = null; App.state.isAddViajeOpen = true; App.render(); },
     deleteViaje: async (id, btnElement) => {
         if(btnElement.innerText === 'Eliminar Viaje') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
-        else { await window.dbHelper.remove('viajes', id); App.closeModals(); }
+        else { window.dbHelper.remove('viajes', id); App.closeModals(); }
     },
     submitViaje: async (e) => {
         e.preventDefault(); const f = e.target; const formD = App.state.formTemp.viaje;
@@ -526,7 +514,7 @@ const App = {
                 }
             }
         }
-        await window.dbHelper.saveBatch(batchOps);
+        window.dbHelper.saveBatch(batchOps);
         App.closeModals();
     },
 
@@ -538,13 +526,13 @@ const App = {
     editCliente: (id) => { const c = App.state.clientesDir.find(c => c.id === id); if(!c) return; App.state.editingClienteId = id; App.state.formTemp.cliente = { ...c }; App.state.selectedCliente = null; App.state.isAddClienteOpen = true; App.render(); },
     deleteCliente: async (id, btnElement) => {
         if(btnElement.innerText === 'Eliminar Registro') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
-        else { await window.dbHelper.remove('clientesDir', id); App.closeModals(); }
+        else { window.dbHelper.remove('clientesDir', id); App.closeModals(); }
     },
     submitCliente: async (e) => {
         e.preventDefault(); const f = e.target;
         const clientData = { nombre: f.nombre.value, tipo: f.tipo.value, segmento: f.segmento.value, nit: f.nit.value || 'N/A', telefono: f.telefono.value, ubicacion: f.ubicacion.value };
         const newId = App.state.editingClienteId || Date.now();
-        await window.dbHelper.save('clientesDir', newId, { id: newId, ...clientData });
+        window.dbHelper.save('clientesDir', newId, { id: newId, ...clientData });
         App.closeModals();
     },
 
@@ -564,7 +552,42 @@ const App = {
             { colName: 'pagosNomina', id: newId, data: { id: newId, fecha: f.fecha.value, viaje: f.viaje.value, valor: totalPagado, estado: 'Pagado', detalle: detalleText, extra: extraInfo } },
             { colName: 'transacciones', id: newId + 1, data: { id: newId + 1, cuentaId: ctaId, tipo: 'egreso', monto: totalPagado, fecha: f.fecha.value, concepto: `Liquidación de Nómina - ${f.viaje.value}`, modulo: 'Nomina', referencia: newId } }
         ];
-        await window.dbHelper.saveBatch(batchOps);
+        window.dbHelper.saveBatch(batchOps);
+        App.closeModals();
+    },
+
+    openModalSocio: (id) => { App.state.selectedSocio = App.state.socios.find(s => s.id === id); App.render(); },
+    editSocio: (id) => { const s = App.state.socios.find(x => x.id === id); if(!s) return; App.state.editingSocioId = id; App.state.formTemp.socio = { ...s, saldoMantenimiento: Math.abs(s.saldoMantenimiento), cuentaId: '' }; App.state.selectedSocio = null; App.state.isAddSocioOpen = true; App.render(); },
+    deleteSocio: async (id, btnElement) => {
+        if(btnElement.innerText === 'Eliminar Registro') { btnElement.innerText = 'Confirmar Borrado'; btnElement.classList.replace('bg-slate-100', 'bg-red-600'); btnElement.classList.replace('text-red-600', 'text-white'); } 
+        else { window.dbHelper.remove('socios', id); App.closeModals(); }
+    },
+    submitSocio: async (e) => {
+        e.preventDefault(); const f = e.target; const formD = App.state.formTemp.socio; const ctaId = parseInt(f.cuentaId?.value);
+        const newId = App.state.editingSocioId || Date.now();
+        
+        const socioData = { nombre: f.nombre.value, porcentaje: parseFloat(f.porcentaje.value), inversion: formD.inversion, saldoMantenimiento: f.tipoSaldo.value === 'deuda' ? -Math.abs(formD.saldoMantenimiento) : Math.abs(formD.saldoMantenimiento), utilidadCausada: App.state.editingSocioId ? App.state.socios.find(x => x.id === newId).utilidadCausada : 0 };
+        
+        const batchOps = [{ colName: 'socios', id: newId, data: { id: newId, ...socioData } }];
+        if (!App.state.editingSocioId && formD.inversion > 0 && ctaId) {
+            batchOps.push({ colName: 'transacciones', id: Date.now() + 1, data: { id: Date.now() + 1, cuentaId: ctaId, tipo: 'ingreso', monto: formD.inversion, fecha: new Date().toISOString().split('T')[0], concepto: `Aporte Inversión Inicial - ${socioData.nombre}`, modulo: 'Socios', referencia: newId } });
+        }
+        window.dbHelper.saveBatch(batchOps);
+        App.closeModals();
+    },
+    openTransferModal: () => { App.state.isTransferOpen = true; App.render(); },
+    submitTransferencia: async (e) => {
+        e.preventDefault(); const f = e.target; const vId = parseInt(f.vendedorId.value); const cId = parseInt(f.compradorId.value); const pctStr = f.porcentaje.value.replace(',', '.'); const pct = parseFloat(pctStr);
+        if(vId === cId) return; const s = App.state.socios; const vIdx = s.findIndex(x => x.id === vId); const cIdx = s.findIndex(x => x.id === cId);
+        if(vIdx === -1 || cIdx === -1 || pct <= 0 || pct > s[vIdx].porcentaje) return;
+
+        const fraction = pct / s[vIdx].porcentaje; const invTransfer = s[vIdx].inversion * fraction; const deudaTransfer = s[vIdx].saldoMantenimiento * fraction;
+        
+        const batchOps = [
+            { colName: 'socios', id: vId, data: { ...s[vIdx], porcentaje: s[vIdx].porcentaje - pct, inversion: s[vIdx].inversion - invTransfer, saldoMantenimiento: s[vIdx].saldoMantenimiento - deudaTransfer } },
+            { colName: 'socios', id: cId, data: { ...s[cIdx], porcentaje: s[cIdx].porcentaje + pct, inversion: s[cIdx].inversion + invTransfer, saldoMantenimiento: s[cIdx].saldoMantenimiento + deudaTransfer } }
+        ];
+        window.dbHelper.saveBatch(batchOps);
         App.closeModals();
     },
 
@@ -2229,15 +2252,8 @@ window.onload = () => {
                     colecciones.forEach(col => {
                         const colRef = collection(db, 'artifacts', appIdStr, 'public', 'data', col);
                         const unsub = onSnapshot(colRef, (snapshot) => {
-                            const data = snapshot.docs.map(d => d.data());
-                            
-                            if (data.length > 0) { 
-                                window.App.state[col] = data; 
-                                window.hasLoadedFromCloud[col] = true;
-                            } else if (window.hasLoadedFromCloud[col]) {
-                                window.App.state[col] = []; 
-                            }
-                            
+                            // Asignación Atómica y Directa desde el caché/nube de Firestore
+                            window.App.state[col] = snapshot.docs.map(d => d.data());
                             window.App.render(); 
                         }, (error) => {
                             console.error(`Error recibiendo datos de ${col}:`, error);
