@@ -289,7 +289,7 @@ const App = {
         if (file.type.startsWith('image/') || file.type === 'application/pdf') {
             try {
                 const base64Data = await fileToBase64(file);
-                const apiKey = ""; // API Key proveída automáticamente por el entorno de ejecución
+                const apiKey = "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764"; // API Key proveída automáticamente por el entorno de ejecución
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
                 // APEX PROMPT: Inyección de instrucción de clasificación por línea.
