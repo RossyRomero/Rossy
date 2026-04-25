@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Don Sebe ERP - Sistema Operativo</title>
+    <title>Don Sebe 1.0 </title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -163,6 +163,8 @@ const App = {
         carteraViajeFiltro: 'Todos', dbFiltroPeriodo: 'Todos', dbFiltroRuta: 'Todos',
         alertMsg: null, // PARCHE: Estado para alertas customizadas
         
+        backupConfig: JSON.parse(localStorage.getItem('donsebe_backup_config')) || { auto: false, time: '18:00', last: '' },
+        
         selectedViaje: null, selectedCliente: null, selectedSocio: null,
         isAddViajeOpen: false, isAddClienteOpen: false, isAddNominaOpen: false, isAddSocioOpen: false, isTransferOpen: false, isAddCuentaOpen: false, isAddTransaccionOpen: false,
         editingViajeId: null, editingClienteId: null, editingSocioId: null, editingCuentaId: null,
@@ -212,6 +214,67 @@ const App = {
     // MÓDULO DE ALERTAS CUSTOMIZADAS (Remplaza a los 'alert' nativos prohibidos)
     showAlert: (msg) => { App.state.alertMsg = msg; App.render(); },
     closeAlert: () => { App.state.alertMsg = null; App.render(); },
+
+    // CORE: GESTIÓN DE RESPALDOS Y CRON AUTOMÁTICO
+    setBackupConfig: (field, value) => {
+        App.state.backupConfig[field] = value;
+        localStorage.setItem('donsebe_backup_config', JSON.stringify(App.state.backupConfig));
+        App.render();
+    },
+    exportFullBackup: () => {
+        const s = App.state;
+        const data = { cuentas: s.cuentas, transacciones: s.transacciones, viajes: s.viajes, carteraViajes: s.carteraViajes, carteraClientes: s.carteraClientes, clientesDir: s.clientesDir, socios: s.socios, pagosNomina: s.pagosNomina, timestamp: new Date().toISOString() };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url; link.download = `DonSebe_FullBackup_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        
+        App.state.backupConfig.last = new Date().toISOString().split('T')[0];
+        localStorage.setItem('donsebe_backup_config', JSON.stringify(App.state.backupConfig));
+        App.render();
+    },
+    triggerFileInput: () => { document.getElementById('backup-file-input').click(); },
+    importFullBackup: async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const data = JSON.parse(event.target.result);
+                if (!data.viajes || !data.cuentas) throw new Error("Estructura de Backup Inválida");
+                
+                App.showAlert("⏳ Inicializando restauración desde copia de seguridad. Por favor, no cierres la aplicación.");
+                
+                const cols = ['cuentas', 'transacciones', 'viajes', 'carteraViajes', 'carteraClientes', 'clientesDir', 'socios', 'pagosNomina'];
+                const batchOps = [];
+                
+                cols.forEach(col => {
+                    if (data[col]) { data[col].forEach(item => { batchOps.push({ colName: col, id: item.id, data: item }); }); }
+                });
+                
+                await window.dbHelper.saveBatch(batchOps);
+                App.showAlert("✅ Restauración y Carga Manual completada con éxito. Toda la base de datos se ha sincronizado.");
+            } catch (err) {
+                console.error(err);
+                App.showAlert("❌ Error al leer el archivo. Asegúrate de que subiste un archivo .json válido de Don Sebe.");
+            }
+            e.target.value = '';
+        };
+        reader.readAsText(file);
+    },
+    checkAutoBackup: () => {
+        const config = App.state.backupConfig;
+        if (!config.auto) return;
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
+        const localTime = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+        
+        if (localTime === config.time && config.last !== today) {
+            console.log("⏱️ Ejecutando Auto-Backup programado (Cron Job Local)...");
+            App.exportFullBackup();
+        }
+    },
 
     setTab: (tab) => { App.state.activeTab = tab; App.state.isFabOpen = false; App.render(); },
     setNiifTab: (tab) => { App.state.niifTab = tab; App.render(); },
@@ -920,13 +983,50 @@ const App = {
     renderConfig: () => {
         const c = App.state.config.pdfIncludes;
         const ui = App.state.config.ui;
+        const b = App.state.backupConfig;
         return `
         <div class="space-y-6 animate-fade-in print:hidden">
             <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0">
                 <div><h2 class="text-2xl font-bold flex items-center"><i data-lucide="settings" class="mr-2 text-blue-600 w-6 h-6"></i> Configuración del Sistema</h2><p class="text-sm text-slate-500">Ajustes de interfaz y preferencias de exportación</p></div>
             </div>
 
-            <div class="bg-blue-50 rounded-2xl shadow-sm border border-blue-200 p-6 max-w-2xl relative overflow-hidden">
+            <!-- Nuevo Módulo de Backups Locales Integrado -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 max-w-2xl mt-6">
+                <h3 class="font-bold text-lg text-slate-800 mb-2 border-b pb-3 flex items-center"><i data-lucide="database-backup" class="w-5 h-5 mr-2 text-blue-600"></i> Copias de Seguridad (Backups)</h3>
+                <p class="text-xs text-slate-500 mb-5">Exporta toda la base de datos a un archivo local seguro (.json), o realiza una carga manual restaurando el sistema desde un respaldo previo.</p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <button onclick="App.exportFullBackup()" class="bg-blue-600 text-white font-bold py-3 px-4 rounded-xl hover:bg-blue-700 shadow-sm flex items-center justify-center transition-colors text-sm">
+                        <i data-lucide="download-cloud" class="w-4 h-4 mr-2"></i> Descargar Backup (.json)
+                    </button>
+                    <div>
+                        <input type="file" id="backup-file-input" accept=".json" onchange="App.importFullBackup(event)" class="hidden" />
+                        <button onclick="App.triggerFileInput()" class="bg-slate-800 text-white font-bold py-3 px-4 rounded-xl hover:bg-slate-900 shadow-sm flex items-center justify-center transition-colors w-full text-sm">
+                            <i data-lucide="upload-cloud" class="w-4 h-4 mr-2"></i> Carga Manual (Restaurar)
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                    <div class="flex justify-between items-center mb-3">
+                        <div>
+                            <h4 class="font-bold text-sm text-slate-800">Descarga Automática Programada</h4>
+                            <p class="text-[10px] text-slate-500">Se descargará el archivo .json diariamente a la zona de descargas de tu navegador (requiere tener la pestaña abierta a la hora indicada).</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                          <input type="checkbox" onchange="App.setBackupConfig('auto', this.checked)" ${b.auto ? 'checked' : ''} class="sr-only peer">
+                          <div class="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                        </label>
+                    </div>
+                    <div class="flex items-center justify-between ${!b.auto ? 'opacity-50 pointer-events-none' : ''}">
+                        <label class="text-xs font-bold text-slate-600">Hora de ejecución diaria:</label>
+                        <input type="time" value="${b.time}" onchange="App.setBackupConfig('time', this.value)" class="border border-slate-300 rounded-lg p-2 text-sm font-bold text-slate-700 outline-none focus:border-blue-500" ${!b.auto ? 'disabled' : ''}>
+                    </div>
+                    ${b.last ? `<p class="text-[9px] text-green-600 font-bold mt-3 text-right uppercase">Último auto-respaldo: ${b.last}</p>` : ''}
+                </div>
+            </div>
+
+            <div class="bg-blue-50 rounded-2xl shadow-sm border border-blue-200 p-6 max-w-2xl relative overflow-hidden mt-6">
                 <div class="absolute top-0 right-0 p-4"><i data-lucide="cloud" class="w-20 h-20 text-blue-200 opacity-50"></i></div>
                 <h3 class="font-bold text-lg text-blue-900 mb-2 border-b border-blue-200 pb-3 flex items-center relative z-10"><i data-lucide="cloud-cog" class="w-5 h-5 mr-2 text-blue-600"></i> Motor Offline-First Activo</h3>
                 <p class="text-xs text-blue-800 mb-5 relative z-10">El sistema cuenta con caché dura (IndexedDB). Si pierdes la conexión, la app seguirá funcionando con los datos locales. Todos los cambios, registros o eliminaciones se encolarán silenciosamente y se fusionarán con la nube apenas recuperes la red.</p>
@@ -1778,6 +1878,11 @@ window.onload = () => {
     
     window.addEventListener('online', () => window.App.render());
     window.addEventListener('offline', () => window.App.render());
+
+    // Motor Cron para Evaluar la Copia de Seguridad Local cada 30 segundos
+    setInterval(() => {
+        if(window.App && window.App.checkAutoBackup) window.App.checkAutoBackup();
+    }, 30000);
 
     if (window.isFirebaseReady) {
         
