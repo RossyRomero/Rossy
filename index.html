@@ -57,7 +57,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, initializeFirestore, persistentLocalCache, collection, doc, setDoc, getDoc, deleteDoc, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, getDoc, deleteDoc, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 /**
  * ==========================================
@@ -97,9 +97,13 @@ try {
     auth = getAuth(app);
     
     try {
-        db = initializeFirestore(app, { localCache: persistentLocalCache() });
-        console.log("📦 Motor Offline de Firebase activado (IndexedDB).");
+        // CORRECCIÓN CRÍTICA: Activación de Persistencia Fuerte Multi-Pestaña
+        db = initializeFirestore(app, { 
+            localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) 
+        });
+        console.log("📦 Motor Offline de Firebase activado (IndexedDB Fuerte).");
     } catch (e) {
+        console.warn("Fallo persistencia MultiTab, intentando fallback...", e);
         db = getFirestore(app); 
     }
     
@@ -110,31 +114,49 @@ try {
 
 /**
  * ==========================================
- * 2. MOTOR HÍBRIDO DE DATOS (SSOT - SINGLE SOURCE OF TRUTH)
+ * 2. MOTOR HÍBRIDO DE DATOS (OPTIMISTIC UI + SILENT SYNC)
  * ==========================================
- * Refactorizado para máxima eficiencia: En lugar de mutar la interfaz manualmente y
- * esperar a la red, delegamos la mutación 100% a Firestore. Firestore actualiza el 
- * caché nativo instantáneamente y dispara 'onSnapshot', logrando UI en tiempo real 
- * sin bloqueos de red ni promesas colgadas.
+ * La forma más eficiente: El sistema muta la interfaz local inmediatamente (0 ms delay),
+ * garantizando que el usuario vea su cambio, y delega a la caché persistente de Firestore 
+ * la tarea de sincronizar con la nube en segundo plano.
  */
 window.dbHelper = {
     save: (colName, id, data) => {
+        // 1. Inyección Local Inmediata (Optimistic Update)
+        const col = App.state[colName];
+        const idx = col.findIndex(x => x.id === id);
+        if (idx !== -1) col[idx] = { ...col[idx], ...data };
+        else col.push({ id, ...data });
+        if (!App.isAnyModalOpen()) App.render();
+
+        // 2. Delegación a Cola de Firestore
         if (!window.isFirebaseReady || !currentUser) return;
         const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString());
-        // Ejecución NO bloqueante (Fire and forget). Confía en el caché local.
         setDoc(ref, data, { merge: true }).catch(e => console.error(`Error Sync [${colName}]:`, e));
     },
     saveBatch: (operations) => {
+        // 1. Inyección Local Inmediata (Optimistic Update)
+        operations.forEach(op => {
+            const col = App.state[op.colName];
+            const idx = col.findIndex(x => x.id === op.id);
+            if (idx !== -1) col[idx] = { ...col[idx], ...op.data };
+            else col.push({ id: op.id, ...op.data });
+        });
+        if (!App.isAnyModalOpen()) App.render();
+
+        // 2. Delegación Transaccional a Cola de Firestore
         if (!window.isFirebaseReady || !currentUser) return;
         const batch = writeBatch(db);
         operations.forEach(op => {
             const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', op.colName, op.id.toString());
             batch.set(ref, op.data, { merge: true });
         });
-        // Ejecución NO bloqueante.
         batch.commit().catch(e => console.error("Error Sync [Batch]:", e));
     },
     remove: (colName, id) => {
+        App.state[colName] = App.state[colName].filter(x => x.id !== id);
+        if (!App.isAnyModalOpen()) App.render();
+
         if (!window.isFirebaseReady || !currentUser) return;
         const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString());
         deleteDoc(ref).catch(e => console.error(`Error Delete [${colName}]:`, e));
@@ -205,6 +227,12 @@ const App = {
         { id: 'basedatos', label: 'BD Ingresos', icon: 'database' },
         { id: 'config', label: 'Ajustes', icon: 'settings' }
     ],
+
+    // Validador Anti-Flicker: Protege al usuario de redibujos de pantalla mientras usa formularios
+    isAnyModalOpen: () => {
+        const s = App.state;
+        return s.isAddViajeOpen || s.isAddClienteOpen || s.isAddNominaOpen || s.isAddSocioOpen || s.isTransferOpen || s.isAddCuentaOpen || s.isAddTransaccionOpen || s.isPagoCarteraOpen || s.numpad.isOpen || s.alertMsg !== null;
+    },
 
     // MÓDULO DE ALERTAS CUSTOMIZADAS (Remplaza a los 'alert' nativos prohibidos)
     showAlert: (msg) => { App.state.alertMsg = msg; App.render(); },
@@ -2252,9 +2280,13 @@ window.onload = () => {
                     colecciones.forEach(col => {
                         const colRef = collection(db, 'artifacts', appIdStr, 'public', 'data', col);
                         const unsub = onSnapshot(colRef, (snapshot) => {
-                            // Asignación Atómica y Directa desde el caché/nube de Firestore
+                            // Sincronización en segundo plano con la nube
                             window.App.state[col] = snapshot.docs.map(d => d.data());
-                            window.App.render(); 
+                            
+                            // PROTECCIÓN UX: Solo redibuja la pantalla si el usuario no tiene un modal abierto
+                            if (!window.App.isAnyModalOpen()) {
+                                window.App.render(); 
+                            }
                         }, (error) => {
                             console.error(`Error recibiendo datos de ${col}:`, error);
                         });
