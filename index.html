@@ -78,7 +78,12 @@
 </head>
 <body class="flex flex-col h-screen bg-slate-50 font-sans overflow-hidden text-slate-800">
 
-    <div id="app-root" class="flex flex-col h-full w-full relative"></div>
+    <div id="app-root" class="flex flex-col h-full w-full relative">
+        <div id="boot-fallback" class="min-h-screen flex flex-col items-center justify-center bg-slate-50 text-slate-600 p-6">
+            <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
+            <p class="text-sm font-bold">Cargando Don Sebe…</p>
+        </div>
+    </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
@@ -223,35 +228,56 @@ try {
 }
 window.firebaseConfig = firebaseConfig;
 
-try {
-    const app = initializeApp(firebaseConfig);
-
-    if (await analyticsIsSupported()) {
-        try {
-            analytics = getAnalytics(app);
-            console.log("📊 Firebase Analytics activo (don-bena).");
-        } catch (e) {
-            console.warn("Analytics no disponible en este contexto:", e);
-        }
-    }
-
-    auth = getAuth(app);
-
+async function initFirebase() {
     try {
-        // Offline-first: caché persistente multi-pestaña (IndexedDB)
-        db = initializeFirestore(app, {
-            localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
-        });
-        console.log("📦 Offline-first activo: IndexedDB + sync bidireccional Firestore.");
-    } catch (e) {
-        console.warn("Fallo persistencia MultiTab, intentando fallback...", e);
-        db = getFirestore(app);
-    }
+        const app = initializeApp(firebaseConfig);
 
-    window.isFirebaseReady = true;
-} catch (error) {
-    console.error("🔥 Error inicializando Firebase. Cargando en Modo Local Estricto:", error);
+        if (await analyticsIsSupported()) {
+            try {
+                analytics = getAnalytics(app);
+                console.log("📊 Firebase Analytics activo (don-bena).");
+            } catch (e) {
+                console.warn("Analytics no disponible en este contexto:", e);
+            }
+        }
+
+        auth = getAuth(app);
+
+        try {
+            db = initializeFirestore(app, {
+                localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+            });
+            console.log("📦 Offline-first activo: IndexedDB + sync bidireccional Firestore.");
+        } catch (e) {
+            console.warn("Fallo persistencia MultiTab, intentando fallback...", e);
+            db = getFirestore(app);
+        }
+
+        window.isFirebaseReady = true;
+    } catch (error) {
+        console.error("🔥 Error inicializando Firebase:", error);
+        window.isFirebaseReady = false;
+    }
 }
+
+const showBootError = (message) => {
+    const root = document.getElementById('app-root');
+    if (!root) return;
+    root.innerHTML = `<div class="min-h-screen flex items-center justify-center bg-red-50 p-6"><div class="max-w-md bg-white border border-red-200 rounded-2xl p-6 shadow-lg"><h2 class="font-black text-red-700 mb-2">Error al iniciar Don Sebe</h2><p class="text-sm text-slate-700">${String(message).replace(/</g, '&lt;')}</p><button onclick="location.reload()" class="mt-4 w-full bg-blue-600 text-white font-bold py-2 rounded-xl">Recargar</button></div></div>`;
+};
+
+window.addEventListener('error', (ev) => {
+    console.error(ev.error || ev.message);
+    if (window.App?.state) return;
+    showBootError(ev.message || 'Error de JavaScript al cargar la aplicación.');
+});
+window.addEventListener('unhandledrejection', (ev) => {
+    console.error(ev.reason);
+    if (window.App?.state && !App.state.authBootstrapping) return;
+    showBootError(ev.reason?.message || String(ev.reason) || 'Error de promesa no controlada.');
+});
+
+await initFirebase();
 
 /**
  * ==========================================
@@ -3356,6 +3382,7 @@ const App = {
 
     render: () => {
         const root = document.getElementById('app-root');
+        if (!root) return;
 
         if (App.state.authBootstrapping) {
             root.innerHTML = `<div class="min-h-screen flex items-center justify-center bg-slate-50"><div class="text-center"><div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div><p class="text-sm font-bold text-slate-500">Verificando sesión…</p></div></div>`;
@@ -3533,6 +3560,43 @@ const App = {
 
 window.App = App;
 
+function bootApplication() {
+    try {
+        localStorage.removeItem('donsebe_offline_snapshot');
+    } catch (_) { /* ignore */ }
+
+    window.App.applyTheme();
+    window.App.render();
+
+    window.addEventListener('online', async () => {
+        if (window.isFirebaseReady && db) {
+            try {
+                await enableNetwork(db);
+                await waitForPendingWrites(db);
+            } catch (e) {
+                console.warn("Reconexión Firestore:", e);
+            }
+        }
+        updateSyncUI();
+    });
+    window.addEventListener('offline', () => updateSyncUI());
+
+    setInterval(() => {
+        if (window.App?.checkAutoBackup) window.App.checkAutoBackup();
+    }, 30000);
+
+    if (window.isFirebaseReady && auth) {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            signInWithCustomToken(auth, __initial_auth_token).catch(err => console.error('Token custom:', err));
+        }
+        onAuthStateChanged(auth, (user) => handleAuthSession(user));
+    } else {
+        App.state.authBootstrapping = false;
+        App.state.authError = 'Firebase no está configurado. Revise la conexión.';
+        App.render();
+    }
+}
+
 /** Marca el proyecto como inicializado sin insertar datos de demostración. */
 const ensureEmptyProjectMetadata = async () => {
     const sysRef = doc(db, 'artifacts', appIdStr, 'public', 'data', '_system', 'metadata');
@@ -3627,44 +3691,7 @@ const startBidirectionalSync = () => {
     });
 };
 
-window.onload = () => {
-    // Instalación limpia: no restaurar respaldos ni caché de sesiones anteriores
-    try {
-        localStorage.removeItem('donsebe_offline_snapshot');
-    } catch (_) { /* ignore */ }
-
-    window.App.applyTheme();
-    window.App.render();
-
-    window.addEventListener('online', async () => {
-        if (window.isFirebaseReady && db) {
-            try {
-                await enableNetwork(db);
-                await waitForPendingWrites(db);
-            } catch (e) {
-                console.warn("Reconexión Firestore:", e);
-            }
-        }
-        updateSyncUI();
-    });
-    window.addEventListener('offline', () => updateSyncUI());
-
-    // Motor Cron para Evaluar la Copia de Seguridad Local cada 30 segundos
-    setInterval(() => {
-        if(window.App && window.App.checkAutoBackup) window.App.checkAutoBackup();
-    }, 30000);
-
-    if (window.isFirebaseReady && auth) {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            signInWithCustomToken(auth, __initial_auth_token).catch(err => console.error('Token custom:', err));
-        }
-        onAuthStateChanged(auth, (user) => handleAuthSession(user));
-    } else {
-        App.state.authBootstrapping = false;
-        App.state.authError = 'Firebase no está configurado. Revise la conexión.';
-        App.render();
-    }
-};
+bootApplication();
 
 </script>
 </body>
