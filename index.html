@@ -7,7 +7,18 @@
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%93%3C/text%3E%3C/svg%3E">
     <link rel="apple-touch-icon" href="icono.png">
+    <script>
+    (function () {
+        if (!location.hostname.endsWith('github.io')) return;
+        var parts = location.pathname.split('/').filter(Boolean);
+        if (!parts.length || parts[0].indexOf('.') !== -1) return;
+        var base = document.createElement('base');
+        base.href = location.origin + '/' + parts[0] + '/';
+        document.head.insertBefore(base, document.head.firstChild);
+    })();
+    </script>
     
     <!-- Librerías Externas -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -75,17 +86,21 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
 /**
  * ==========================================
  * 1. CONFIGURACIÓN FIREBASE — don-bena (SDK 12.13.0)
+ * GCP Project Number: 1079830886823 (consola: project-1079830886823)
+ * Firebase Project ID: don-bena
  * ==========================================
  */
+const GCP_PROJECT_NUMBER = '1079830886823';
 const fallbackConfig = {
     apiKey: "AIzaSyAfg_3iDYdmtbVcUJpCzIBCPscYbSqjBkc",
     authDomain: "don-bena.firebaseapp.com",
     projectId: "don-bena",
     storageBucket: "don-bena.firebasestorage.app",
-    messagingSenderId: "1079830886823",
-    appId: "1:1079830886823:web:5165496dc2182eba8bde82",
+    messagingSenderId: GCP_PROJECT_NUMBER,
+    appId: "1:" + GCP_PROJECT_NUMBER + ":web:5165496dc2182eba8bde82",
     measurementId: "G-JCF6XKH307"
 };
+window.FIREBASE_PROJECT = { projectId: 'don-bena', projectNumber: GCP_PROJECT_NUMBER };
 
 let auth = null;
 let db = null;
