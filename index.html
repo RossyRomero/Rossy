@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Don Sebe Version 1.2</title>
+    <title>Don Sebe — Instalación limpia</title>
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -67,34 +67,77 @@
     <div id="app-root" class="flex flex-col h-full w-full relative"></div>
 
 <script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, getDoc, deleteDoc, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
+import { getAnalytics, isSupported as analyticsIsSupported } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-analytics.js";
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, getDoc, deleteDoc, onSnapshot, writeBatch, enableNetwork, waitForPendingWrites } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 /**
  * ==========================================
- * 1. CONFIGURACIÓN FIREBASE (DINÁMICA DE ENTORNO)
+ * 1. CONFIGURACIÓN FIREBASE — don-bena (SDK 12.13.0)
  * ==========================================
  */
 const fallbackConfig = {
-    apiKey: "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764",
-    authDomain: "nexus-jr.firebaseapp.com",
-    projectId: "nexus-jr",
-    storageBucket: "nexus-jr.firebasestorage.app",
-    messagingSenderId: "273022472068",
-    appId: "1:273022472068:web:74cf3c09e664d2a9f2d7d1"
+    apiKey: "AIzaSyAfg_3iDYdmtbVcUJpCzIBCPscYbSqjBkc",
+    authDomain: "don-bena.firebaseapp.com",
+    projectId: "don-bena",
+    storageBucket: "don-bena.firebasestorage.app",
+    messagingSenderId: "1079830886823",
+    appId: "1:1079830886823:web:5165496dc2182eba8bde82",
+    measurementId: "G-JCF6XKH307"
 };
 
 let auth = null;
 let db = null;
+let analytics = null;
 window.isFirebaseReady = false;
 let currentUser = null;
 window.activeFirebaseListeners = [];
 window.hasLoadedFromCloud = {};
+window.syncEngine = {
+    collectionsReady: {},
+    pendingByCollection: {},
+    fromCache: true,
+    hasPendingWrites: false,
+    lastServerSyncAt: null
+};
 
+const SYNC_COLLECTIONS = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina', 'carteraViajes', 'carteraClientes', 'usuarios'];
 const appIdStr = typeof __app_id !== 'undefined' ? __app_id : "don-sebe-erp";
 
-// Inicialización Segura Dinámica con Motor Offline Nativo (IndexedDB)
+const normalizeDoc = (snapDoc) => {
+    const data = snapDoc.data();
+    return { ...data, id: data.id ?? (Number(snapDoc.id) || snapDoc.id) };
+};
+
+const applyCollectionChange = (colName, change) => {
+    if (!window.App?.state?.[colName]) return;
+    const col = window.App.state[colName];
+    const data = normalizeDoc(change.doc);
+    const idx = col.findIndex(x => String(x.id) === String(data.id));
+    if (change.type === 'removed') {
+        if (idx !== -1) col.splice(idx, 1);
+        return;
+    }
+    if (idx !== -1) col[idx] = data;
+    else col.push(data);
+};
+
+const refreshSyncFlags = () => {
+    if (!window.App?.state) return;
+    const pending = window.syncEngine.pendingByCollection;
+    window.App.state.isSyncingData = Object.values(pending).some(Boolean);
+    window.App.state.syncFromCache = window.syncEngine.fromCache;
+    window.App.state.syncReady = SYNC_COLLECTIONS.every(c => window.syncEngine.collectionsReady[c]);
+};
+
+const updateSyncUI = () => {
+    if (!window.App) return;
+    refreshSyncFlags();
+    if (!window.App.isAnyModalOpen()) window.App.render();
+};
+
+// Inicialización dinámica con override opcional de entorno
 let firebaseConfig = fallbackConfig;
 try {
     if (typeof __firebase_config !== 'undefined' && __firebase_config) {
@@ -103,22 +146,33 @@ try {
 } catch (e) {
     console.warn("JSON Parse Fallback para Configuración:", e);
 }
+window.firebaseConfig = firebaseConfig;
 
 try {
     const app = initializeApp(firebaseConfig);
+
+    if (await analyticsIsSupported()) {
+        try {
+            analytics = getAnalytics(app);
+            console.log("📊 Firebase Analytics activo (don-bena).");
+        } catch (e) {
+            console.warn("Analytics no disponible en este contexto:", e);
+        }
+    }
+
     auth = getAuth(app);
-    
+
     try {
-        // CORRECCIÓN CRÍTICA: Activación de Persistencia Fuerte Multi-Pestaña
-        db = initializeFirestore(app, { 
-            localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) 
+        // Offline-first: caché persistente multi-pestaña (IndexedDB)
+        db = initializeFirestore(app, {
+            localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
         });
-        console.log("📦 Motor Offline de Firebase activado (IndexedDB Fuerte).");
+        console.log("📦 Offline-first activo: IndexedDB + sync bidireccional Firestore.");
     } catch (e) {
         console.warn("Fallo persistencia MultiTab, intentando fallback...", e);
-        db = getFirestore(app); 
+        db = getFirestore(app);
     }
-    
+
     window.isFirebaseReady = true;
 } catch (error) {
     console.error("🔥 Error inicializando Firebase. Cargando en Modo Local Estricto:", error);
@@ -126,11 +180,11 @@ try {
 
 /**
  * ==========================================
- * 2. MOTOR HÍBRIDO DE DATOS (OPTIMISTIC UI + SILENT SYNC)
+ * 2. MOTOR OFFLINE-FIRST + SYNC BIDIRECCIONAL
  * ==========================================
- * La forma más eficiente: El sistema muta la interfaz local inmediatamente (0 ms delay),
- * garantizando que el usuario vea su cambio, y delega a la caché persistente de Firestore 
- * la tarea de sincronizar con la nube en segundo plano.
+ * Escritura: UI optimista → IndexedDB (persistentLocalCache) → cola hacia don-bena.
+ * Lectura: onSnapshot con includeMetadataChanges (caché local primero, luego servidor).
+ * Los cambios remotos entran por docChanges; los locales suben por setDoc/writeBatch.
  */
 window.dbHelper = {
     save: (colName, id, data) => {
@@ -191,7 +245,7 @@ window.parseCOP = (valueStr) => Number(valueStr.replace(/[^0-9.-]+/g,""));
 const App = {
     state: {
         activeTab: 'dashboard', niifTab: 'estado-situacion', docTab: 'escaner',
-        uploadSuccess: false, isFabOpen: false, isSyncingData: false,
+        uploadSuccess: false, isFabOpen: false, isSyncingData: false, syncFromCache: true, syncReady: false,
         carteraViajeFiltro: 'Todos', dbFiltroPeriodo: 'Todos', dbFiltroRuta: 'Todos',
         informePdfFiltro: 'Todos', informePdfDesde: '', informePdfHasta: '',
         dbActiveMatrix: 'viajes', // PARCHE: Selector de Matriz de Datos
@@ -244,6 +298,23 @@ const App = {
         ]
     },
 
+    getSyncStatus: () => {
+        const s = App.state;
+        if (!navigator.onLine) {
+            return { dot: 'bg-orange-400', label: 'Offline · caché local', title: 'Sin red. Los cambios se guardan en IndexedDB y suben al reconectar.' };
+        }
+        if (s.isSyncingData) {
+            return { dot: 'bg-amber-400 animate-pulse', label: 'Sincronizando…', title: 'Subiendo cambios locales a don-bena' };
+        }
+        if (s.syncFromCache && !s.syncReady) {
+            return { dot: 'bg-sky-400', label: 'Caché local · conectando', title: 'Datos desde disco; validando con el servidor' };
+        }
+        if (s.syncFromCache) {
+            return { dot: 'bg-sky-400', label: 'Caché + nube activa', title: 'Offline-first: lectura local, sync bidireccional activa' };
+        }
+        return { dot: 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.5)]', label: 'En línea · sincronizado', title: 'Firestore don-bena al día' };
+    },
+
     navItems: [
         { id: 'dashboard', label: 'Inicio', icon: 'trending-up' },
         { id: 'tesoreria', label: 'Cajas/Bancos', icon: 'wallet-cards' },
@@ -289,7 +360,7 @@ const App = {
         if (file.type.startsWith('image/') || file.type === 'application/pdf') {
             try {
                 const base64Data = await fileToBase64(file);
-                const apiKey = "AIzaSyBLbvNxeF7SqjZ4tRSDH0O2BvIVrIuG764"; // API Key proveída automáticamente por el entorno de ejecución
+                const apiKey = window.firebaseConfig?.apiKey || fallbackConfig.apiKey;
                 const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
                 // APEX PROMPT: Inyección de instrucción de clasificación por línea.
@@ -347,10 +418,11 @@ const App = {
 
                 const data = await callApi();
                 let textResult = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!textResult) throw new Error('La API no devolvió texto estructurado.');
                 textResult = textResult.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
                 const parsed = JSON.parse(textResult);
 
-                const clienteMatch = s.clientesDir.length > 0 ? s.clientesDir[Math.floor(Math.random() * s.clientesDir.length)].nombre : '';
+                const clienteMatch = '';
 
                 const newDoc = { 
                     id: Date.now(), 
@@ -374,24 +446,9 @@ const App = {
                 App.showAlert(`⚠️ Fallo de Decodificación Estructural: ${error.message}.`);
             }
         } else {
-            // Simulador Fallback para PDFs o Excels (Documentos no visuales)
-            setTimeout(() => {
-                const baseAmount = Math.floor(Math.random() * 5000000) + 150000;
-                const clienteMatch = s.clientesDir.length > 0 ? s.clientesDir[Math.floor(Math.random() * s.clientesDir.length)].nombre : '';
-                const viajeMatch = s.viajes.length > 0 ? s.viajes[Math.floor(Math.random() * s.viajes.length)] : null;
-                const rutaMatch = viajeMatch ? viajeMatch.ruta : '';
-
-                const mockExtractedData = [
-                    { id: Date.now()+1, fecha: new Date().toISOString().split('T')[0], concepto: `Extracción PDF / Documento Textual`, monto: baseAmount, archivo: file.name, matchCliente: clienteMatch, matchRuta: rutaMatch }
-                ];
-                
-                if(!App.state.documentosProcesados) App.state.documentosProcesados = [];
-                App.state.documentosProcesados = [...mockExtractedData, ...App.state.documentosProcesados];
-                
-                App.showAlert(`🧠 Análisis Textual Completado.\nEl motor ha cruzado los datos del archivo "${file.name}" con tu Base de Datos.`);
-                App.state.isProcessingIA = false;
-                App.render();
-            }, 2500);
+            App.showAlert('Formato no soportado. Use imagen (JPG, PNG) o PDF para el escáner IA.');
+            App.state.isProcessingIA = false;
+            App.render();
             return;
         }
         
@@ -3041,10 +3098,11 @@ const App = {
             <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden shadow-sm sticky top-0">
                 <div class="flex items-center">
                     ${App.state.activeTab !== 'dashboard' ? `<button onclick="window.App.setTab('dashboard')" class="mr-3 sm:mr-4 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
-                    <h1 onclick="window.App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> Don Sebe v1.2</h1>
+                    <h1 onclick="window.App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> Don Sebe</h1>
                 </div>
-                <div class="bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold shadow-md flex items-center transition-all min-w-[120px] justify-center">
-                    ${navigator.onLine ? `<div class="w-2 h-2 bg-green-400 rounded-full mr-2 shadow-[0_0_8px_rgba(74,222,128,0.5)]"></div> En Línea (Sincronizado)` : `<div class="w-2 h-2 bg-orange-400 rounded-full mr-2"></div> Modo Local (Offline)`}
+                <div title="${App.getSyncStatus().title}" class="bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold shadow-md flex items-center transition-all min-w-[120px] justify-center">
+                    <div class="w-2 h-2 ${App.getSyncStatus().dot} rounded-full mr-2 shrink-0"></div>
+                    <span class="truncate">${App.getSyncStatus().label}</span>
                 </div>
             </header>
             
@@ -3172,78 +3230,76 @@ const App = {
 
 window.App = App;
 
-window.runInitialMigration = async (silent = false) => {
-    // Alerta reemplazada por prompt custom no bloqueante en el futuro, por ahora retornamos silent si bloquea
-    const ops = [];
+/** Marca el proyecto como inicializado sin insertar datos de demostración. */
+const ensureEmptyProjectMetadata = async () => {
+    const sysRef = doc(db, 'artifacts', appIdStr, 'public', 'data', '_system', 'metadata');
+    const sysSnap = await getDoc(sysRef);
+    if (!sysSnap.exists()) {
+        await setDoc(sysRef, {
+            initialized: true,
+            emptyInstall: true,
+            createdAt: new Date().toISOString()
+        });
+        console.log('✅ Proyecto don-bena listo (sin datos precargados).');
+    }
+};
 
-    // INYECCIÓN DE USUARIO ADMIN MAESTRO
-    const adminUser = { id: 1, nombre: 'Admin', clave: '1234', rol: 'admin', permisoEdicion: true, modulosVisibles: App.navItems.map(i => i.id) };
-    ops.push({ colName: 'usuarios', id: adminUser.id, data: adminUser });
+const startBidirectionalSync = () => {
+    window.activeFirebaseListeners.forEach(unsub => unsub());
+    window.activeFirebaseListeners = [];
+    window.syncEngine.collectionsReady = {};
+    window.syncEngine.pendingByCollection = {};
 
-    [{ id: 1, nombre: 'Banco Agrario Principal', tipo: 'banco', saldoInicial: 10000000, numero: '123-456-789' },
-     { id: 2, nombre: 'Efectivo Barcos (Caja Fuerte)', tipo: 'caja', saldoInicial: 3731255, numero: 'Efectivo' },
-     { id: 3, nombre: 'Caja Menor Operativa', tipo: 'caja_menor', saldoInicial: 1500000, numero: 'Efectivo' }].forEach(c => ops.push({ colName: 'cuentas', id: c.id, data: c }));
+    SYNC_COLLECTIONS.forEach(col => {
+        const colRef = collection(db, 'artifacts', appIdStr, 'public', 'data', col);
+        const unsub = onSnapshot(
+            colRef,
+            { includeMetadataChanges: true },
+            (snapshot) => {
+                const meta = snapshot.metadata;
+                window.syncEngine.fromCache = meta.fromCache;
+                window.syncEngine.pendingByCollection[col] = meta.hasPendingWrites;
+                if (!meta.fromCache) {
+                    window.syncEngine.lastServerSyncAt = new Date().toISOString();
+                    window.hasLoadedFromCloud[col] = true;
+                }
 
-    [{ id: 1, nombre: 'PRI (Socio 40%)', porcentaje: 40.0, inversion: 447637320, saldoMantenimiento: -81900472, utilidadCausada: 88998444 },
-     { id: 2, nombre: 'Enel-Luz', porcentaje: 39.0, inversion: 766593300, saldoMantenimiento: 0, utilidadCausada: 86773482 },
-     { id: 3, nombre: 'Roel', porcentaje: 15.0, inversion: 277500000, saldoMantenimiento: 0, utilidadCausada: 33374416 },
-     { id: 4, nombre: 'Ronel', porcentaje: 2.22, inversion: 40000000, saldoMantenimiento: 0, utilidadCausada: 4939413 },
-     { id: 5, nombre: 'Roy', porcentaje: 1.94, inversion: 30000000, saldoMantenimiento: 0, utilidadCausada: 4316335 },
-     { id: 6, nombre: 'Rossy', porcentaje: 1.7, inversion: 15849000, saldoMantenimiento: 0, utilidadCausada: 3782438 }].forEach(s => ops.push({ colName: 'socios', id: s.id, data: s }));
+                if (!window.syncEngine.collectionsReady[col]) {
+                    window.App.state[col] = snapshot.docs.map(d => normalizeDoc(d));
+                    window.syncEngine.collectionsReady[col] = true;
+                } else if (snapshot.docChanges().length > 0) {
+                    snapshot.docChanges().forEach(change => applyCollectionChange(col, change));
+                }
 
-    [{ id: 1, fecha: '2025-10-25', viaje: 'Viaje #1', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 66956000, gastos: 29107000, utilidadBruta: 37849000, cartera: 12411000, ingresoRecaudado: 54545000, observaciones: 'Madera bajada Satinga', clientesAsociados: 'Oscar, Pepe', productos: 'Madera Aserrada', pagoFlete: 54545000, pagoCargue: 2000000 },
-     { id: 2, fecha: '2025-11-09', viaje: 'Viaje #2', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Satinga', ingreso: 46440300, gastos: 18340300, utilidadBruta: 28100000, cartera: 11084000, ingresoRecaudado: 35356300, observaciones: 'Madera de exportación', clientesAsociados: 'Oscar', productos: 'Madera Fina', pagoFlete: 35356300, pagoCargue: 1500000 },
-     { id: 3, fecha: '2025-11-19', viaje: 'Viaje #3', periodo: 'Oct-Nov 2025', ruta: 'B/tura - Charco', ingreso: 73131000, gastos: 26871000, utilidadBruta: 46260000, cartera: 0, ingresoRecaudado: 73131000, observaciones: 'Flete completo pagado', clientesAsociados: 'Konny Hospital', productos: 'Equipos Médicos', pagoFlete: 73131000, pagoCargue: 3000000 },
-     { id: 4, fecha: '2025-12-02', viaje: 'Viaje #4', periodo: 'Dic 2025', ruta: 'B/tura - Charco', ingreso: 80023500, gastos: 22800000, utilidadBruta: 57223500, cartera: 32119500, ingresoRecaudado: 47904000, observaciones: 'Tubos, Grava, Varillas Tola', clientesAsociados: 'Alex, Oscar', productos: 'Material Construcción, Madera', pagoFlete: 47904000, pagoCargue: 4500000 },
-     { id: 5, fecha: '2025-12-23', viaje: 'Viaje #5', periodo: 'Dic 2025', ruta: 'B/tura - Tumaco', ingreso: 34820000, gastos: 16000000, utilidadBruta: 18820000, cartera: 0, ingresoRecaudado: 34820000, observaciones: 'Viaje Tumaco sin cartera', clientesAsociados: 'Modesto', productos: 'Víveres y Abarrotes', pagoFlete: 34820000, pagoCargue: 1200000 },
-     { id: 6, fecha: '2026-01-15', viaje: 'Viaje #6', periodo: 'Ene 2026', ruta: 'B/tura - General', ingreso: 150000000, gastos: 42874400, utilidadBruta: 107125600, cartera: 54800000, ingresoRecaudado: 95200000, observaciones: 'Consolidado Enero 2026 (Sheet6)', clientesAsociados: 'Jhon Jairo Silva, Alex', productos: 'Equipos, Cemento, Grava', pagoFlete: 95200000, pagoCargue: 5000000 }].forEach(v => ops.push({ colName: 'viajes', id: v.id, data: v }));
-
-    [{ id: 1, idViaje: 1, viaje: 'Viaje #1', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 12411000, fecha: '2025-10-25' },
-     { id: 2, idViaje: 2, viaje: 'Viaje #2', cliente: 'Oscar', concepto: 'Madera bajada Satinga', valor: 11084000, fecha: '2025-11-09' },
-     { id: 3, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Tubos / Grava La Tola', valor: 13000000, fecha: '2025-12-02' },
-     { id: 4, idViaje: 4, viaje: 'Viaje #4', cliente: 'Konny Hospital', concepto: 'Proyecto Hospital', valor: 1000000, fecha: '2025-12-02' },
-     { id: 5, idViaje: 4, viaje: 'Viaje #4', cliente: 'Alex', concepto: 'Varillas Tola', valor: 4900000, fecha: '2025-12-02' },
-     { id: 6, idViaje: 4, viaje: 'Viaje #4', cliente: 'Oscar', concepto: 'Madera bajada', valor: 8209500, fecha: '2025-12-02' },
-     { id: 7, idViaje: 6, viaje: 'Viaje #6', cliente: 'John Jairo Silva', concepto: 'Equipos e insumos', valor: 41300000, fecha: '2026-01-15' },
-     { id: 8, idViaje: 6, viaje: 'Viaje #6', cliente: 'Alex', concepto: 'Tubo Proyecto', valor: 8000000, fecha: '2026-01-15' },
-     { id: 9, idViaje: 6, viaje: 'Viaje #6', cliente: 'Varios', concepto: 'Saldo Enero', valor: 5500000, fecha: '2026-01-15' }].forEach(c => ops.push({ colName: 'carteraViajes', id: c.id, data: c }));
-
-    [{ id: 1, cliente: 'John Jairo Silva', conceptoGeneral: 'Equipos e insumos', valorTotal: 41300000, viajesAsociados: 'Viaje #6', estado: 'Pendiente' },
-     { id: 2, cliente: 'Oscar', conceptoGeneral: 'Madera bajada (Satinga)', valorTotal: 31704500, viajesAsociados: 'Viaje #1, #2, #4', estado: 'Pendiente' },
-     { id: 3, cliente: 'Alex', conceptoGeneral: 'Materiales construcción Tola', valorTotal: 25900000, viajesAsociados: 'Viaje #4, #6', estado: 'Pendiente' },
-     { id: 4, cliente: 'Konny Hospital', conceptoGeneral: 'Transporte Hospital', valorTotal: 1000000, viajesAsociados: 'Viaje #4', estado: 'Pendiente' }].forEach(c => ops.push({ colName: 'carteraClientes', id: c.id, data: c }));
-
-    [{ id: 101, cuentaId: 2, tipo: 'egreso', monto: 1900000, fecha: '2026-01-26', concepto: 'Aceite Greicy', modulo: 'Mantenimiento' },
-     { id: 102, cuentaId: 2, tipo: 'egreso', monto: 1000000, fecha: '2026-01-26', concepto: 'Modesto Capital Greicy', modulo: 'Tesoreria' },
-     { id: 103, cuentaId: 2, tipo: 'egreso', monto: 1000000, fecha: '2026-01-25', concepto: 'Utilidades Roel Nov-Dic 2025', modulo: 'Socios' },
-     { id: 104, cuentaId: 2, tipo: 'egreso', monto: 3458000, fecha: '2026-01-28', concepto: 'Combustible Karina Mar', modulo: 'Gastos' },
-     { id: 105, cuentaId: 2, tipo: 'egreso', monto: 260000, fecha: '2026-01-28', concepto: 'Agencia Enero y Zarpe Greicy', modulo: 'Viajes' },
-     { id: 106, cuentaId: 2, tipo: 'egreso', monto: 2800000, fecha: '2026-01-28', concepto: 'Muelle B/tura Greicy y Karina', modulo: 'Gastos' },
-     { id: 107, cuentaId: 2, tipo: 'egreso', monto: 700000, fecha: '2026-01-28', concepto: 'NGS Karina Mar Don Heberto', modulo: 'Mantenimiento' },
-     { id: 108, cuentaId: 2, tipo: 'egreso', monto: 850000, fecha: '2026-01-30', concepto: 'Vigilancia Karina Dic - Ene 27 2026', modulo: 'Gastos' },
-     { id: 109, cuentaId: 2, tipo: 'egreso', monto: 10000000, fecha: '2025-12-28', concepto: 'Pago Utilidades PRI (Dic)', modulo: 'Socios' },
-     { id: 110, cuentaId: 2, tipo: 'egreso', monto: 15000000, fecha: '2025-12-30', concepto: 'Pago Utilidades PRI (Dic)', modulo: 'Socios' },
-     { id: 111, cuentaId: 2, tipo: 'egreso', monto: 5000000, fecha: '2026-02-15', concepto: 'Pago Utilidades PRI', modulo: 'Socios' },
-     { id: 112, cuentaId: 2, tipo: 'egreso', monto: 2000000, fecha: '2026-04-16', concepto: 'Pago Utilidades PRI', modulo: 'Socios' }
-    ].forEach(t => ops.push({ colName: 'transacciones', id: t.id, data: t }));
-
-    [{ id: 1, nombre: 'John Jairo Silva', tipo: 'Equipos e Insumos', segmento: 'Comerciante', nit: '111111111-1', telefono: '310 000 0000', ubicacion: 'Buenaventura' },
-     { id: 2, nombre: 'Oscar', tipo: 'Comerciante de Madera', segmento: 'Persona Común', nit: '222222222', telefono: '312 000 0000', ubicacion: 'Satinga' },
-     { id: 3, nombre: 'Alex', tipo: 'Materiales Construcción', segmento: 'Comerciante', nit: '333333333-3', telefono: '315 000 0000', ubicacion: 'La Tola' },
-     { id: 4, nombre: 'Konny Hospital', tipo: 'Institucional / Salud', segmento: 'Proyecto', nit: '900000000-1', telefono: '318 000 0000', ubicacion: 'El Charco' },
-     { id: 5, nombre: 'Modesto', tipo: 'Socio / Proveedor', segmento: 'Interno', nit: 'N/A', telefono: '320 000 0000', ubicacion: 'Tumaco' }].forEach(c => ops.push({ colName: 'clientesDir', id: c.id, data: c }));
-
-    await window.dbHelper.saveBatch(ops);
-    if (!silent) App.showAlert("✅ Extracción exhaustiva de Datos de Excel completada.\nSe han sincronizado en Firestore:\n- Socios e Inversiones Reales\n- 6 Viajes (Octubre a Enero)\n- Cartera Detallada (Jhon Jairo, Oscar, Alex...)\n- Transacciones de Efectivo Barcos y Pagos de Utilidades.");
-    App.render();
+                updateSyncUI();
+            },
+            (error) => console.error(`Error sync bidireccional [${col}]:`, error)
+        );
+        window.activeFirebaseListeners.push(unsub);
+    });
 };
 
 window.onload = () => {
+    // Instalación limpia: no restaurar respaldos ni caché de sesiones anteriores
+    try {
+        localStorage.removeItem('donsebe_offline_snapshot');
+    } catch (_) { /* ignore */ }
+
     window.App.applyTheme();
     window.App.render();
-    
-    window.addEventListener('online', () => window.App.render());
-    window.addEventListener('offline', () => window.App.render());
+
+    window.addEventListener('online', async () => {
+        if (window.isFirebaseReady && db) {
+            try {
+                await enableNetwork(db);
+                await waitForPendingWrites(db);
+            } catch (e) {
+                console.warn("Reconexión Firestore:", e);
+            }
+        }
+        updateSyncUI();
+    });
+    window.addEventListener('offline', () => updateSyncUI());
 
     // Motor Cron para Evaluar la Copia de Seguridad Local cada 30 segundos
     setInterval(() => {
@@ -3251,7 +3307,7 @@ window.onload = () => {
     }, 30000);
 
     if (window.isFirebaseReady) {
-        
+
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -3268,41 +3324,14 @@ window.onload = () => {
             onAuthStateChanged(auth, async (user) => {
                 if (user) {
                     currentUser = user;
-                    
-                    const sysRef = doc(db, 'artifacts', appIdStr, 'public', 'data', '_system', 'metadata');
+
                     try {
-                        const sysSnap = await getDoc(sysRef);
-                        if (!sysSnap.exists()) {
-                            console.log("🚀 Base de datos inicial en blanco. Inyectando configuración por defecto automáticamente...");
-                            await window.runInitialMigration(true);
-                            await setDoc(sysRef, { initialized: true, createdAt: new Date().toISOString() });
-                        }
+                        await ensureEmptyProjectMetadata();
                     } catch (e) {
-                        console.warn("Validación de primer inicio omitida por modo Offline total.");
+                        console.warn("Metadatos de inicio omitidos (modo offline):", e);
                     }
 
-                    window.activeFirebaseListeners.forEach(unsub => unsub()); 
-                    window.activeFirebaseListeners = [];
-
-                    // NUEVO: Se agregó 'usuarios' a las colecciones sincronizadas
-                    const colecciones = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina', 'carteraViajes', 'carteraClientes', 'usuarios'];
-                    
-                    colecciones.forEach(col => {
-                        const colRef = collection(db, 'artifacts', appIdStr, 'public', 'data', col);
-                        const unsub = onSnapshot(colRef, (snapshot) => {
-                            // Sincronización en segundo plano con la nube
-                            window.App.state[col] = snapshot.docs.map(d => d.data());
-                            
-                            // PROTECCIÓN UX: Solo redibuja la pantalla si el usuario no tiene un modal abierto
-                            if (!window.App.isAnyModalOpen()) {
-                                window.App.render(); 
-                            }
-                        }, (error) => {
-                            console.error(`Error recibiendo datos de ${col}:`, error);
-                        });
-                        
-                        window.activeFirebaseListeners.push(unsub);
-                    });
+                    startBidirectionalSync();
                 }
             });
         });
