@@ -69,8 +69,8 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
 import { getAnalytics, isSupported as analyticsIsSupported } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-analytics.js";
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, getDoc, deleteDoc, onSnapshot, writeBatch, enableNetwork, waitForPendingWrites } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
+import { getAuth, signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, onAuthStateChanged, RecaptchaVerifier, signInWithPhoneNumber, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, writeBatch, enableNetwork, waitForPendingWrites } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 /**
  * ==========================================
@@ -90,6 +90,8 @@ const fallbackConfig = {
 let auth = null;
 let db = null;
 let analytics = null;
+let recaptchaVerifier = null;
+let phoneConfirmationResult = null;
 window.isFirebaseReady = false;
 let currentUser = null;
 window.activeFirebaseListeners = [];
@@ -104,6 +106,61 @@ window.syncEngine = {
 
 const SYNC_COLLECTIONS = ['cuentas', 'transacciones', 'viajes', 'clientesDir', 'socios', 'pagosNomina', 'carteraViajes', 'carteraClientes', 'usuarios'];
 const appIdStr = typeof __app_id !== 'undefined' ? __app_id : "don-sebe-erp";
+
+const AUTH_ERROR_ES = {
+    'auth/invalid-email': 'Correo electrónico no válido.',
+    'auth/user-disabled': 'Esta cuenta fue deshabilitada.',
+    'auth/user-not-found': 'No existe una cuenta con ese correo.',
+    'auth/wrong-password': 'Contraseña incorrecta.',
+    'auth/email-already-in-use': 'Ese correo ya está registrado.',
+    'auth/weak-password': 'La contraseña debe tener al menos 6 caracteres.',
+    'auth/invalid-credential': 'Credenciales inválidas. Verifica correo y contraseña.',
+    'auth/too-many-requests': 'Demasiados intentos. Espera un momento e intenta de nuevo.',
+    'auth/popup-closed-by-user': 'Inicio con Google cancelado.',
+    'auth/invalid-phone-number': 'Número de teléfono inválido. Use formato +57XXXXXXXXXX.',
+    'auth/missing-phone-number': 'Ingrese un número de teléfono.',
+    'auth/invalid-verification-code': 'Código SMS incorrecto.',
+    'auth/code-expired': 'El código expiró. Solicite uno nuevo.',
+    'auth/captcha-check-failed': 'Verificación reCAPTCHA fallida. Intente de nuevo.',
+    'auth/operation-not-allowed': 'Este método de inicio no está habilitado en Firebase Console.'
+};
+
+const authErrorMessage = (error) => AUTH_ERROR_ES[error?.code] || error?.message || 'Error de autenticación desconocido.';
+
+const userProfileRef = (uid) => doc(db, 'artifacts', appIdStr, 'public', 'data', 'usuarios', uid);
+
+const resolveUserProfile = async (user) => {
+    const ref = userProfileRef(user.uid);
+    const snap = await getDoc(ref);
+    if (snap.exists()) return snap.data();
+
+    const colRef = collection(db, 'artifacts', appIdStr, 'public', 'data', 'usuarios');
+    const existing = await getDocs(colRef);
+    const byEmail = user.email
+        ? existing.docs.find(d => (d.data().email || '').toLowerCase() === user.email.toLowerCase())
+        : null;
+
+    if (byEmail) {
+        const merged = { ...byEmail.data(), id: user.uid, authUid: user.uid, email: user.email || byEmail.data().email || '', telefono: user.phoneNumber || byEmail.data().telefono || '' };
+        await setDoc(ref, merged, { merge: true });
+        if (byEmail.id !== user.uid) await deleteDoc(byEmail.ref).catch(() => {});
+        return merged;
+    }
+
+    const isFirst = existing.empty;
+    const profile = {
+        id: user.uid,
+        authUid: user.uid,
+        nombre: user.displayName || (user.email ? user.email.split('@')[0] : '') || user.phoneNumber || 'Usuario',
+        email: user.email || '',
+        telefono: user.phoneNumber || '',
+        rol: isFirst ? 'admin' : 'usuario',
+        permisoEdicion: isFirst,
+        modulosVisibles: isFirst ? ['dashboard', 'tesoreria', 'viajes', 'finanzas', 'cartera', 'nomina', 'sociedad', 'clientes', 'documentos', 'basedatos', 'config'] : ['dashboard']
+    };
+    await setDoc(ref, profile, { merge: true });
+    return profile;
+};
 
 const normalizeDoc = (snapDoc) => {
     const data = snapDoc.data();
@@ -196,7 +253,7 @@ window.dbHelper = {
         if (!App.isAnyModalOpen()) App.render();
 
         // 2. Delegación a Cola de Firestore
-        if (!window.isFirebaseReady || !currentUser) return;
+        if (!window.isFirebaseReady || !currentUser || !window.App?.canEdit?.()) return;
         const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString());
         setDoc(ref, data, { merge: true }).catch(e => console.error(`Error Sync [${colName}]:`, e));
     },
@@ -211,7 +268,7 @@ window.dbHelper = {
         if (!App.isAnyModalOpen()) App.render();
 
         // 2. Delegación Transaccional a Cola de Firestore (Chunking de 400 por límite)
-        if (!window.isFirebaseReady || !currentUser) return;
+        if (!window.isFirebaseReady || !currentUser || !window.App?.canEdit?.()) return;
         const chunkSize = 400;
         for (let i = 0; i < operations.length; i += chunkSize) {
             const chunk = operations.slice(i, i + chunkSize);
@@ -227,7 +284,7 @@ window.dbHelper = {
         App.state[colName] = App.state[colName].filter(x => x.id !== id);
         if (!App.isAnyModalOpen()) App.render();
 
-        if (!window.isFirebaseReady || !currentUser) return;
+        if (!window.isFirebaseReady || !currentUser || !window.App?.canEdit?.()) return;
         const ref = doc(db, 'artifacts', appIdStr, 'public', 'data', colName, id.toString());
         deleteDoc(ref).catch(e => console.error(`Error Delete [${colName}]:`, e));
     }
@@ -246,6 +303,9 @@ const App = {
     state: {
         activeTab: 'dashboard', niifTab: 'estado-situacion', docTab: 'escaner',
         uploadSuccess: false, isFabOpen: false, isSyncingData: false, syncFromCache: true, syncReady: false,
+        authBootstrapping: true, firebaseUser: null, userProfile: null, authError: null, authLoading: false,
+        authTab: 'email', authMode: 'login',
+        authForm: { email: '', password: '', phone: '', smsCode: '' },
         carteraViajeFiltro: 'Todos', dbFiltroPeriodo: 'Todos', dbFiltroRuta: 'Todos',
         informePdfFiltro: 'Todos', informePdfDesde: '', informePdfHasta: '',
         dbActiveMatrix: 'viajes', // PARCHE: Selector de Matriz de Datos
@@ -271,7 +331,7 @@ const App = {
         numpad: { isOpen: false, targetField: null, targetLabel: '', targetForm: 'viaje', value: '0' },
 
         formTemp: {
-            usuario: { nombre: '', clave: '', rol: 'usuario', permisoEdicion: false, modulosVisibles: [] }, // NUEVO: Formulario Usuarios
+            usuario: { nombre: '', email: '', rol: 'usuario', permisoEdicion: false, modulosVisibles: [] },
             viaje: { modalidad: 'unico', subClientes: [{ cliente: '', flete: '', abono: '' }], fecha: '', ruta: '', observaciones: '', productos: '', clientesAsociados: '', ingreso: 0, gastos: 0, cartera: 0, pagoFlete: 0, pagoCargue: 0, cuentaIngresoId: '', cuentaEgresoId: '' },
             pagoCartera: { idCarteraViaje: null, cliente: '', viaje: '', valorDeuda: 0, montoPagar: 0, cuentaId: '', fecha: '' },
             cliente: { nombre: '', nit: '', segmento: 'Persona Común', tipo: 'General', telefono: '', ubicacion: '' },
@@ -600,7 +660,208 @@ const App = {
         }
     },
 
-    setTab: (tab) => { App.state.activeTab = tab; App.state.isFabOpen = false; App.render(); },
+    setTab: (tab) => {
+        if (!App.canAccessModule(tab)) {
+            App.showAlert('No tienes permiso para acceder a este módulo.');
+            return;
+        }
+        App.state.activeTab = tab;
+        App.state.isFabOpen = false;
+        App.render();
+    },
+
+    getVisibleNavItems: () => {
+        const p = App.state.userProfile;
+        if (!p) return App.navItems.filter(i => i.id === 'dashboard');
+        if (p.rol === 'admin') return App.navItems;
+        const visible = new Set(p.modulosVisibles || ['dashboard']);
+        visible.add('dashboard');
+        return App.navItems.filter(i => visible.has(i.id));
+    },
+
+    canEdit: () => {
+        const p = App.state.userProfile;
+        return !!(p && (p.rol === 'admin' || p.permisoEdicion === true));
+    },
+
+    canAccessModule: (moduleId) => App.getVisibleNavItems().some(i => i.id === moduleId),
+
+    setAuthTab: (tab) => { App.state.authTab = tab; App.state.authError = null; App.render(); },
+    setAuthMode: (mode) => { App.state.authMode = mode; App.state.authError = null; App.render(); },
+
+    renderAuthScreen: () => {
+        const s = App.state;
+        const f = s.authForm;
+        return `
+        <div class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900">
+            <div class="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden animate-scale-in">
+                <div class="bg-gradient-to-r from-blue-600 to-indigo-700 p-8 text-center text-white">
+                    <div class="inline-flex items-center justify-center w-16 h-16 bg-white/20 rounded-2xl mb-4 backdrop-blur-sm">
+                        <i data-lucide="anchor" class="w-8 h-8"></i>
+                    </div>
+                    <h1 class="text-2xl font-black tracking-tight">Don Sebe</h1>
+                    <p class="text-blue-100 text-sm mt-1">ERP Operativo · don-bena</p>
+                </div>
+                <div class="p-6 sm:p-8">
+                    <button type="button" onclick="window.App.signInWithGoogle()" ${s.authLoading ? 'disabled' : ''}
+                        class="w-full flex items-center justify-center gap-3 border-2 border-slate-200 rounded-xl py-3.5 font-bold text-slate-700 hover:bg-slate-50 hover:border-slate-300 transition-all disabled:opacity-50">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.51 20.53 7.47 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.47 1 3.51 3.47 2.18 7.07l3.67 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                        Continuar con Google
+                    </button>
+                    <div class="flex items-center gap-3 my-6">
+                        <div class="flex-1 h-px bg-slate-200"></div>
+                        <span class="text-xs font-bold text-slate-400 uppercase">o</span>
+                        <div class="flex-1 h-px bg-slate-200"></div>
+                    </div>
+                    <div class="flex rounded-xl bg-slate-100 p-1 mb-5">
+                        <button type="button" onclick="window.App.setAuthTab('email')" class="flex-1 py-2 text-xs font-black rounded-lg transition-all ${s.authTab === 'email' ? 'bg-white shadow text-blue-700' : 'text-slate-500'}">Correo</button>
+                        <button type="button" onclick="window.App.setAuthTab('phone')" class="flex-1 py-2 text-xs font-black rounded-lg transition-all ${s.authTab === 'phone' ? 'bg-white shadow text-blue-700' : 'text-slate-500'}">Teléfono</button>
+                    </div>
+                    ${s.authError ? `<div class="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-xs font-medium text-red-700">${s.authError}</div>` : ''}
+                    ${s.authTab === 'email' ? `
+                        <form onsubmit="window.App.submitEmailAuth(event)" class="space-y-4">
+                            <div>
+                                <label class="text-xs font-bold text-slate-500 uppercase">Correo electrónico</label>
+                                <input type="email" name="email" value="${f.email}" required placeholder="tu@correo.com"
+                                    class="w-full mt-1 border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/>
+                            </div>
+                            <div>
+                                <label class="text-xs font-bold text-slate-500 uppercase">Contraseña</label>
+                                <input type="password" name="password" value="${f.password}" required minlength="6" placeholder="Mínimo 6 caracteres"
+                                    class="w-full mt-1 border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/>
+                            </div>
+                            <button type="submit" ${s.authLoading ? 'disabled' : ''} class="w-full bg-blue-600 text-white font-black py-3.5 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                                ${s.authLoading ? 'Procesando…' : (s.authMode === 'login' ? 'Iniciar sesión' : 'Crear cuenta')}
+                            </button>
+                        </form>
+                        <div class="flex justify-between mt-4 text-xs">
+                            <button type="button" onclick="window.App.setAuthMode('${s.authMode === 'login' ? 'register' : 'login'}')" class="font-bold text-blue-600 hover:underline">
+                                ${s.authMode === 'login' ? 'Crear cuenta nueva' : 'Ya tengo cuenta'}
+                            </button>
+                            ${s.authMode === 'login' ? `<button type="button" onclick="window.App.sendPasswordReset()" class="font-bold text-slate-500 hover:underline">Olvidé mi contraseña</button>` : ''}
+                        </div>
+                    ` : s.authMode === 'phone-verify' ? `
+                        <form onsubmit="window.App.verifyPhoneCode(event)" class="space-y-4">
+                            <p class="text-xs text-slate-500">Ingresa el código SMS enviado a <strong>${f.phone}</strong></p>
+                            <input type="text" name="smsCode" inputmode="numeric" maxlength="6" required placeholder="000000"
+                                class="w-full border-2 border-slate-200 p-3 rounded-xl text-center text-lg font-black tracking-widest focus:border-blue-500 outline-none"/>
+                            <button type="submit" ${s.authLoading ? 'disabled' : ''} class="w-full bg-blue-600 text-white font-black py-3.5 rounded-xl hover:bg-blue-700 disabled:opacity-50">Verificar código</button>
+                            <button type="button" onclick="window.App.setAuthMode('login'); window.App.state.authTab='phone'; window.App.render();" class="w-full text-xs font-bold text-slate-500">Cambiar número</button>
+                        </form>
+                    ` : `
+                        <form onsubmit="window.App.sendPhoneCode(event)" class="space-y-4">
+                            <div>
+                                <label class="text-xs font-bold text-slate-500 uppercase">Número móvil (E.164)</label>
+                                <input type="tel" name="phone" value="${f.phone}" required placeholder="+573001234567"
+                                    class="w-full mt-1 border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/>
+                                <p class="text-[10px] text-slate-400 mt-1">Colombia: +57 seguido del número celular.</p>
+                            </div>
+                            <div id="recaptcha-container"></div>
+                            <button type="submit" ${s.authLoading ? 'disabled' : ''} class="w-full bg-indigo-600 text-white font-black py-3.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50">Enviar código SMS</button>
+                        </form>
+                    `}
+                </div>
+            </div>
+        </div>`;
+    },
+
+    signInWithGoogle: async () => {
+        if (!auth) { App.state.authError = 'Firebase no está disponible.'; App.render(); return; }
+        App.state.authLoading = true; App.state.authError = null; App.render();
+        try {
+            await signInWithPopup(auth, new GoogleAuthProvider());
+        } catch (e) {
+            App.state.authError = authErrorMessage(e);
+            App.state.authLoading = false;
+            App.render();
+        }
+    },
+
+    submitEmailAuth: async (e) => {
+        e.preventDefault();
+        if (!auth) return;
+        const email = e.target.email.value.trim();
+        const password = e.target.password.value;
+        App.state.authForm.email = email;
+        App.state.authForm.password = password;
+        App.state.authLoading = true; App.state.authError = null; App.render();
+        try {
+            if (App.state.authMode === 'register') {
+                await createUserWithEmailAndPassword(auth, email, password);
+            } else {
+                await signInWithEmailAndPassword(auth, email, password);
+            }
+        } catch (err) {
+            App.state.authError = authErrorMessage(err);
+            App.state.authLoading = false;
+            App.render();
+        }
+    },
+
+    sendPasswordReset: async () => {
+        const email = App.state.authForm.email || prompt('Ingrese su correo para recuperar contraseña:');
+        if (!email || !auth) return;
+        try {
+            await sendPasswordResetEmail(auth, email.trim());
+            App.showAlert('Se envió un enlace de recuperación a ' + email);
+        } catch (err) {
+            App.state.authError = authErrorMessage(err);
+            App.render();
+        }
+    },
+
+    getRecaptcha: async () => {
+        if (recaptchaVerifier) {
+            try { recaptchaVerifier.clear(); } catch (_) {}
+            recaptchaVerifier = null;
+        }
+        recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
+        await recaptchaVerifier.render();
+        return recaptchaVerifier;
+    },
+
+    sendPhoneCode: async (e) => {
+        e.preventDefault();
+        if (!auth) return;
+        let phone = e.target.phone.value.trim().replace(/\s/g, '');
+        if (!phone.startsWith('+')) phone = '+57' + phone.replace(/^0/, '');
+        App.state.authForm.phone = phone;
+        App.state.authLoading = true; App.state.authError = null; App.render();
+        try {
+            const verifier = await App.getRecaptcha();
+            phoneConfirmationResult = await signInWithPhoneNumber(auth, phone, verifier);
+            App.state.authMode = 'phone-verify';
+            App.state.authLoading = false;
+            App.render();
+        } catch (err) {
+            App.state.authError = authErrorMessage(err);
+            App.state.authLoading = false;
+            App.render();
+        }
+    },
+
+    verifyPhoneCode: async (e) => {
+        e.preventDefault();
+        if (!phoneConfirmationResult) { App.state.authError = 'Solicite un código primero.'; App.render(); return; }
+        App.state.authLoading = true; App.state.authError = null; App.render();
+        try {
+            await phoneConfirmationResult.confirm(e.target.smsCode.value.trim());
+            phoneConfirmationResult = null;
+            App.state.authMode = 'login';
+        } catch (err) {
+            App.state.authError = authErrorMessage(err);
+            App.state.authLoading = false;
+            App.render();
+        }
+    },
+
+    signOut: async () => {
+        if (auth) await signOut(auth);
+        phoneConfirmationResult = null;
+        if (recaptchaVerifier) { try { recaptchaVerifier.clear(); } catch (_) {} recaptchaVerifier = null; }
+    },
+
+
     setNiifTab: (tab) => { App.state.niifTab = tab; App.render(); },
     setDocTab: (tab) => { App.state.docTab = tab; App.render(); },
     setFilterVal: (key, val) => { App.state[key] = val; App.render(); },
@@ -781,7 +1042,7 @@ const App = {
     // CORE GESTIÓN DE USUARIOS Y ROLES (RBAC)
     openAddUsuario: () => {
         App.state.editingUsuarioId = null;
-        App.state.formTemp.usuario = { nombre: '', clave: '', rol: 'usuario', permisoEdicion: false, modulosVisibles: App.navItems.map(i => i.id) };
+        App.state.formTemp.usuario = { nombre: '', email: '', rol: 'usuario', permisoEdicion: false, modulosVisibles: App.navItems.map(i => i.id) };
         App.state.isAddUsuarioOpen = true;
         App.render();
     },
@@ -811,10 +1072,11 @@ const App = {
         });
         const data = {
             nombre: f.nombre.value,
-            clave: f.clave.value,
+            email: (f.email?.value || '').trim().toLowerCase(),
             rol: f.rol.value,
             permisoEdicion: f.permisoEdicion.checked,
-            modulosVisibles: modulos
+            modulosVisibles: modulos,
+            authUid: App.state.editingUsuarioId ? (App.state.usuarios.find(x => x.id === App.state.editingUsuarioId)?.authUid || '') : ''
         };
         const newId = App.state.editingUsuarioId || Date.now();
         window.dbHelper.save('usuarios', newId, { id: newId, ...data });
@@ -1027,7 +1289,7 @@ const App = {
         App.state.formTemp.transferencia = { vendedorId: '', compradorId: '', porcentaje: 0 };
         App.state.formTemp.cuenta = { nombre: '', tipo: 'banco', saldoInicial: 0, numero: '' };
         App.state.formTemp.transaccion = { tipo: 'ingreso', monto: 0, fecha: new Date().toISOString().split('T')[0], concepto: '', cuentaId: '', cuentaDestinoId: '' };
-        App.state.formTemp.usuario = { nombre: '', clave: '', rol: 'usuario', permisoEdicion: false, modulosVisibles: [] };
+        App.state.formTemp.usuario = { nombre: '', email: '', rol: 'usuario', permisoEdicion: false, modulosVisibles: [] };
         App.render(); 
     },
 
@@ -1179,7 +1441,7 @@ const App = {
             <div class="mt-8 bg-white p-5 sm:p-6 rounded-2xl shadow-sm border border-slate-100">
                 <h3 class="text-lg font-bold text-slate-800 mb-5 flex items-center"><i data-lucide="layout-grid" class="mr-2 text-blue-600 w-5 h-5"></i> Módulos del Sistema</h3>
                 <div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-3 sm:gap-4">
-                    ${App.navItems.filter(item => item.id !== 'dashboard').map(item => `
+                    ${App.getVisibleNavItems().filter(item => item.id !== 'dashboard').map(item => `
                         <button onclick="window.App.setTab('${item.id}')" class="flex flex-col items-center justify-center p-4 bg-slate-50 rounded-2xl border border-slate-100 hover:bg-blue-50 hover:border-blue-200 hover:shadow-md transition-all group">
                             <div class="bg-white p-3 rounded-full mb-3 shadow-sm group-hover:text-blue-600 transition-colors">
                                 <i data-lucide="${item.icon}" class="w-6 h-6 text-slate-600 group-hover:text-blue-600 transition-colors"></i>
@@ -3040,7 +3302,7 @@ const App = {
                 <form onsubmit="window.App.submitUsuario(event)" class="space-y-4">
                     <div class="grid grid-cols-2 gap-3">
                         <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Nombre / Usuario</label><input name="nombre" type="text" value="${fUser.nombre}" placeholder="Ej: Administrador" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
-                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Contraseña</label><input name="clave" type="text" value="${fUser.clave}" placeholder="Ej: 1234" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
+                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Correo (vinculación Firebase)</label><input name="email" type="email" value="${fUser.email || ''}" placeholder="usuario@correo.com" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
                     </div>
                     <div class="flex items-center space-x-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
                         <div class="flex-1 space-y-1">
@@ -3076,7 +3338,22 @@ const App = {
 
     render: () => {
         const root = document.getElementById('app-root');
-        
+
+        if (App.state.authBootstrapping) {
+            root.innerHTML = `<div class="min-h-screen flex items-center justify-center bg-slate-50"><div class="text-center"><div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div><p class="text-sm font-bold text-slate-500">Verificando sesión…</p></div></div>`;
+            return;
+        }
+
+        if (!App.state.firebaseUser) {
+            root.innerHTML = App.renderAuthScreen();
+            if (window.lucide) window.lucide.createIcons();
+            return;
+        }
+
+        if (!App.canAccessModule(App.state.activeTab)) {
+            App.state.activeTab = 'dashboard';
+        }
+
         let mainContent = '';
         switch(App.state.activeTab) {
             case 'dashboard': mainContent = App.renderDashboard(); break;
@@ -3092,17 +3369,26 @@ const App = {
             case 'config': mainContent = App.renderConfig(); break;
         }
 
+        const profile = App.state.userProfile;
+        const profileLabel = profile ? (profile.nombre || profile.email || 'Usuario') : '';
+
         root.innerHTML = `
             ${App.renderModals()}
             
-            <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden shadow-sm sticky top-0">
-                <div class="flex items-center">
-                    ${App.state.activeTab !== 'dashboard' ? `<button onclick="window.App.setTab('dashboard')" class="mr-3 sm:mr-4 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
-                    <h1 onclick="window.App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6"></i> Don Sebe</h1>
+            <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden shadow-sm sticky top-0 gap-2">
+                <div class="flex items-center min-w-0">
+                    ${App.state.activeTab !== 'dashboard' ? `<button onclick="window.App.setTab('dashboard')" class="mr-3 sm:mr-4 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors shrink-0"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
+                    <h1 onclick="window.App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors truncate"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6 shrink-0"></i> Don Sebe</h1>
                 </div>
-                <div title="${App.getSyncStatus().title}" class="bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] sm:text-xs font-bold shadow-md flex items-center transition-all min-w-[120px] justify-center">
-                    <div class="w-2 h-2 ${App.getSyncStatus().dot} rounded-full mr-2 shrink-0"></div>
-                    <span class="truncate">${App.getSyncStatus().label}</span>
+                <div class="flex items-center gap-2 shrink-0">
+                    <div title="${App.getSyncStatus().title}" class="hidden sm:flex bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-md items-center">
+                        <div class="w-2 h-2 ${App.getSyncStatus().dot} rounded-full mr-2"></div>
+                        <span class="truncate max-w-[100px]">${App.getSyncStatus().label}</span>
+                    </div>
+                    <div class="flex items-center gap-2 bg-slate-100 pl-3 pr-1 py-1 rounded-full border border-slate-200">
+                        <span class="text-[10px] sm:text-xs font-bold text-slate-700 max-w-[90px] truncate" title="${profileLabel}">${profileLabel}</span>
+                        <button type="button" onclick="window.App.signOut()" title="Cerrar sesión" class="p-1.5 rounded-full hover:bg-red-50 text-slate-500 hover:text-red-600"><i data-lucide="log-out" class="w-4 h-4"></i></button>
+                    </div>
                 </div>
             </header>
             
@@ -3110,8 +3396,7 @@ const App = {
                 <div class="max-w-6xl mx-auto">${mainContent}</div>
             </main>
 
-            <!-- FAB Botón Flotante con estética limpia (Glassmorphism) -->
-            <div class="fixed bottom-6 right-6 z-50 print:hidden flex flex-col items-end space-y-3">
+            ${App.canEdit() ? `<div class="fixed bottom-6 right-6 z-50 print:hidden flex flex-col items-end space-y-3">
                 ${App.state.isFabOpen ? `
                     <button onclick="window.App.state.isAddViajeOpen=true; window.App.state.editingViajeId=null; window.App.state.isFabOpen=false; window.App.render()" class="bg-blue-600 text-white p-3.5 rounded-full shadow-lg hover:bg-blue-700 flex items-center animate-fade-in transition-transform hover:scale-105 group">
                         <span class="mr-3 font-bold text-xs bg-white/90 backdrop-blur-sm text-slate-700 px-3 py-1.5 rounded-xl shadow-sm border border-slate-200/50 group-hover:text-blue-700 transition-colors">Nuevo Viaje</span>
@@ -3129,7 +3414,7 @@ const App = {
                 <button onclick="window.App.state.isFabOpen = !window.App.state.isFabOpen; window.App.render()" class="bg-slate-900 text-white p-4 rounded-full shadow-2xl hover:bg-slate-800 active:scale-95 transition-transform border-2 border-white/20">
                     <i data-lucide="${App.state.isFabOpen ? 'x' : 'plus'}" class="w-6 h-6 transition-transform ${App.state.isFabOpen ? 'rotate-90' : ''}"></i>
                 </button>
-            </div>
+            </div>` : ''}
         `;
 
         if (window.lucide) window.lucide.createIcons();
@@ -3244,6 +3529,46 @@ const ensureEmptyProjectMetadata = async () => {
     }
 };
 
+const stopBidirectionalSync = () => {
+    window.activeFirebaseListeners.forEach(unsub => unsub());
+    window.activeFirebaseListeners = [];
+    window.syncEngine.collectionsReady = {};
+    window.syncEngine.pendingByCollection = {};
+    if (window.App?.state) {
+        SYNC_COLLECTIONS.forEach(col => { window.App.state[col] = []; });
+    }
+};
+
+const handleAuthSession = async (user) => {
+    App.state.authBootstrapping = true;
+    App.state.authLoading = false;
+    App.render();
+
+    if (!user) {
+        currentUser = null;
+        App.state.firebaseUser = null;
+        App.state.userProfile = null;
+        stopBidirectionalSync();
+        App.state.authBootstrapping = false;
+        App.render();
+        return;
+    }
+
+    currentUser = user;
+    App.state.firebaseUser = user;
+    try {
+        App.state.userProfile = await resolveUserProfile(user);
+        await ensureEmptyProjectMetadata();
+        startBidirectionalSync();
+        App.state.authError = null;
+    } catch (e) {
+        console.error('Error cargando perfil:', e);
+        App.state.authError = 'No se pudo cargar tu perfil: ' + e.message;
+    }
+    App.state.authBootstrapping = false;
+    App.render();
+};
+
 const startBidirectionalSync = () => {
     window.activeFirebaseListeners.forEach(unsub => unsub());
     window.activeFirebaseListeners = [];
@@ -3269,6 +3594,11 @@ const startBidirectionalSync = () => {
                     window.syncEngine.collectionsReady[col] = true;
                 } else if (snapshot.docChanges().length > 0) {
                     snapshot.docChanges().forEach(change => applyCollectionChange(col, change));
+                }
+
+                if (col === 'usuarios' && window.App.state.firebaseUser) {
+                    const mine = window.App.state.usuarios.find(u => String(u.id) === String(window.App.state.firebaseUser.uid) || u.authUid === window.App.state.firebaseUser.uid);
+                    if (mine) window.App.state.userProfile = mine;
                 }
 
                 updateSyncUI();
@@ -3306,35 +3636,15 @@ window.onload = () => {
         if(window.App && window.App.checkAutoBackup) window.App.checkAutoBackup();
     }, 30000);
 
-    if (window.isFirebaseReady) {
-
-        const initAuth = async () => {
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (err) {
-                console.error("Error Auth Firebase:", err);
-            }
-        };
-
-        initAuth().then(() => {
-            onAuthStateChanged(auth, async (user) => {
-                if (user) {
-                    currentUser = user;
-
-                    try {
-                        await ensureEmptyProjectMetadata();
-                    } catch (e) {
-                        console.warn("Metadatos de inicio omitidos (modo offline):", e);
-                    }
-
-                    startBidirectionalSync();
-                }
-            });
-        });
+    if (window.isFirebaseReady && auth) {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            signInWithCustomToken(auth, __initial_auth_token).catch(err => console.error('Token custom:', err));
+        }
+        onAuthStateChanged(auth, (user) => handleAuthSession(user));
+    } else {
+        App.state.authBootstrapping = false;
+        App.state.authError = 'Firebase no está configurado. Revise la conexión.';
+        App.render();
     }
 };
 
