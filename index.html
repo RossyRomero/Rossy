@@ -2759,11 +2759,16 @@ const App = {
     exportFullBackup: () => {
         const s = App.state;
         const data = { cuentas: s.cuentas, transacciones: s.transacciones, viajes: s.viajes, carteraViajes: s.carteraViajes, carteraClientes: s.carteraClientes, clientesDir: s.clientesDir, socios: s.socios, pagosNomina: s.pagosNomina, usuarios: s.usuarios, timestamp: new Date().toISOString() };
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = url; link.download = `DonSebe_FullBackup_${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        const json = JSON.stringify(data, null, 2);
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.donsebeExport) {
+            window.webkit.messageHandlers.donsebeExport.postMessage(json);
+        } else {
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url; link.download = `DonSebe_FullBackup_${new Date().toISOString().split('T')[0]}.json`;
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        }
         
         App.state.backupConfig.last = new Date().toISOString().split('T')[0];
         localStorage.setItem('donsebe_backup_config', JSON.stringify(App.state.backupConfig));
