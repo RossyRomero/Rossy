@@ -42,6 +42,17 @@
         .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
         .table-scroll { -webkit-overflow-scrolling: touch; }
 
+        /* Navegación fija: módulos siempre visibles (PWA / móvil) */
+        .app-bottom-nav {
+            padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+        }
+        .app-main-with-nav {
+            padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+        }
+        @media (min-width: 768px) {
+            .app-main-with-nav { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
+        }
+
         /* NUEVO: Cámara de Renderizado para Exportación PDF Perfecta */
         .pdf-render-chamber { position: absolute; left: -9999px; width: 900px; display: block; background: white; }
         .chart-print-container { height: 280px; width: 100%; margin: 15px 0; }
@@ -778,6 +789,25 @@ const App = {
     },
 
     canAccessModule: (moduleId) => App.getVisibleNavItems().some(i => i.id === moduleId),
+
+    renderAppNav: () => {
+        const active = App.state.activeTab;
+        const items = App.getVisibleNavItems();
+        return `
+            <nav class="app-bottom-nav fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-4px_20px_rgba(15,23,42,0.08)] print:hidden" aria-label="Módulos del sistema">
+                <div class="flex overflow-x-auto hide-scroll gap-0.5 px-1.5 pt-1.5 max-w-6xl mx-auto">
+                    ${items.map(item => {
+                        const isActive = active === item.id;
+                        return `
+                        <button type="button" onclick="window.App.setTab('${item.id}')" title="${item.label}"
+                            class="shrink-0 flex flex-col items-center justify-center min-w-[4.25rem] max-w-[5.5rem] flex-1 px-1 py-1.5 rounded-xl transition-colors ${isActive ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'}">
+                            <i data-lucide="${item.icon}" class="w-5 h-5 mb-0.5 ${isActive ? 'text-white' : 'text-slate-500'}"></i>
+                            <span class="text-[9px] sm:text-[10px] font-bold leading-tight text-center truncate w-full px-0.5">${item.label}</span>
+                        </button>`;
+                    }).join('')}
+                </div>
+            </nav>`;
+    },
 
     setAuthTab: (tab) => { App.state.authTab = tab; App.state.authError = null; App.render(); },
     setAuthMode: (mode) => { App.state.authMode = mode; App.state.authError = null; App.render(); },
@@ -3486,11 +3516,13 @@ const App = {
                 </div>
             </header>
             
-            <main class="flex-1 overflow-y-auto p-4 md:p-6 pb-8 bg-slate-50 print:bg-white print:p-0 print:overflow-visible">
+            <main class="flex-1 overflow-y-auto p-4 md:p-6 app-main-with-nav bg-slate-50 print:bg-white print:p-0 print:overflow-visible print:pb-0">
                 <div class="max-w-6xl mx-auto">${mainContent}</div>
             </main>
 
-            ${App.canEdit() ? `<div class="fixed bottom-6 right-6 z-50 print:hidden flex flex-col items-end space-y-3">
+            ${App.renderAppNav()}
+
+            ${App.canEdit() ? `<div class="fixed bottom-[5.75rem] right-4 sm:bottom-24 sm:right-6 z-50 print:hidden flex flex-col items-end space-y-3" style="padding-bottom: env(safe-area-inset-bottom, 0px);">
                 ${App.state.isFabOpen ? `
                     <button onclick="window.App.state.isAddViajeOpen=true; window.App.state.editingViajeId=null; window.App.state.isFabOpen=false; window.App.render()" class="bg-blue-600 text-white p-3.5 rounded-full shadow-lg hover:bg-blue-700 flex items-center animate-fade-in transition-transform hover:scale-105 group">
                         <span class="mr-3 font-bold text-xs bg-white/90 backdrop-blur-sm text-slate-700 px-3 py-1.5 rounded-xl shadow-sm border border-slate-200/50 group-hover:text-blue-700 transition-colors">Nuevo Viaje</span>
