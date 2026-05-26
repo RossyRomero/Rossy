@@ -46,6 +46,7 @@
         .app-bottom-nav {
             padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
         }
+        a.donsebe-link { color: inherit; -webkit-tap-highlight-color: transparent; }
         .app-main-with-nav {
             padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
         }
@@ -128,7 +129,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-app.js";
 import { getAnalytics, isSupported as analyticsIsSupported } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-analytics.js";
-import { getAuth, signInWithPopup, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, onAuthStateChanged, RecaptchaVerifier, signInWithPhoneNumber, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
+import { getAuth, signInWithPopup, signInWithCredential, GoogleAuthProvider, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, onAuthStateChanged, RecaptchaVerifier, signInWithPhoneNumber, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-auth.js";
 import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, setDoc, getDoc, getDocs, deleteDoc, onSnapshot, writeBatch, enableNetwork, waitForPendingWrites } from "https://www.gstatic.com/firebasejs/12.13.0/firebase-firestore.js";
 
 /**
@@ -549,6 +550,78 @@ const App = {
         App.render();
     },
 
+    /** Enlace interno de la app (sin HTML externo). Ej: donsebe://app?tab=viajes */
+    appLink: (params) => {
+        const q = params instanceof URLSearchParams ? params.toString() : String(params || '');
+        return `donsebe://app?${q}`;
+    },
+
+    routeAppLink: (href) => {
+        try {
+            const u = typeof href === 'string' ? new URL(href) : href;
+            if (u.protocol !== 'donsebe:') return false;
+
+            const tab = u.searchParams.get('tab');
+            if (tab) {
+                if (!App.canAccessModule(tab)) {
+                    App.showAlert('No tienes permiso para acceder a este módulo.');
+                    return true;
+                }
+                App.setTab(tab);
+                return true;
+            }
+
+            if (u.searchParams.get('nuevoUsuario') === '1') {
+                if (!App.canAccessModule('config')) { App.showAlert('Sin permiso.'); return true; }
+                if (App.state.activeTab !== 'config') App.setTab('config');
+                App.openAddUsuario();
+                return true;
+            }
+
+            const editId = u.searchParams.get('editUsuario');
+            if (editId) {
+                if (!App.canAccessModule('config')) { App.showAlert('Sin permiso.'); return true; }
+                if (App.state.activeTab !== 'config') App.setTab('config');
+                App.editUsuario(Number(editId));
+                return true;
+            }
+
+            const rol = u.searchParams.get('usuarioRol');
+            if (rol && App.state.isAddUsuarioOpen) {
+                App.setUsuarioRol(rol);
+                return true;
+            }
+
+            const modTodos = u.searchParams.get('modulosTodos');
+            if (modTodos !== null && App.state.isAddUsuarioOpen) {
+                App.setUsuarioModulosTodos(modTodos === '1');
+                return true;
+            }
+
+            const toggleMod = u.searchParams.get('toggleModulo');
+            if (toggleMod && App.state.isAddUsuarioOpen) {
+                App.toggleUsuarioModulo(toggleMod);
+                return true;
+            }
+
+            return false;
+        } catch (err) {
+            console.warn('[DonSebe] routeAppLink', err);
+            return false;
+        }
+    },
+
+    bindAppLinks: () => {
+        if (window.__donSebeLinksBound) return;
+        window.__donSebeLinksBound = true;
+        document.addEventListener('click', (e) => {
+            const a = e.target.closest('a[href^="donsebe://"]');
+            if (!a) return;
+            e.preventDefault();
+            App.routeAppLink(a.getAttribute('href') || a.href);
+        }, true);
+    },
+
     getVisibleNavItems: () => {
         const p = App.state.userProfile;
         if (!p) return App.navItems.filter(i => i.id === 'dashboard');
@@ -575,12 +648,13 @@ const App = {
                 <div class="flex overflow-x-auto hide-scroll gap-0.5 px-1.5 pt-1.5 max-w-6xl mx-auto">
                     ${items.map(item => {
                         const isActive = active === item.id;
+                        const href = App.appLink(new URLSearchParams({ tab: item.id }));
                         return `
-                        <button type="button" onclick="window.App.setTab('${item.id}')" title="${item.label}"
-                            class="shrink-0 flex flex-col items-center justify-center min-w-[4.25rem] max-w-[5.5rem] flex-1 px-1 py-1.5 rounded-xl transition-colors ${isActive ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'}">
+                        <a href="${href}" title="${item.label}" role="tab" aria-selected="${isActive}"
+                            class="donsebe-link shrink-0 flex flex-col items-center justify-center min-w-[4.25rem] max-w-[5.5rem] flex-1 px-1 py-1.5 rounded-xl transition-colors no-underline ${isActive ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'}">
                             <i data-lucide="${item.icon}" class="w-5 h-5 mb-0.5 ${isActive ? 'text-white' : 'text-slate-500'}"></i>
                             <span class="text-[9px] sm:text-[10px] font-bold leading-tight text-center truncate w-full px-0.5">${item.label}</span>
-                        </button>`;
+                        </a>`;
                     }).join('')}
                 </div>
             </nav>`;
@@ -693,8 +767,27 @@ const App = {
     signInWithGoogle: async () => {
         if (!auth) { App.state.authError = 'Firebase no está disponible.'; App.render(); return; }
         App.state.authLoading = true; App.state.authError = null; App.render();
+        if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.donsebeGoogleSignIn) {
+            window.webkit.messageHandlers.donsebeGoogleSignIn.postMessage({});
+            return;
+        }
         try {
             await signInWithPopup(auth, new GoogleAuthProvider());
+        } catch (e) {
+            App.state.authError = authErrorMessage(e);
+            App.state.authLoading = false;
+            App.render();
+        }
+    },
+
+    /** Llamado desde iOS (Google Sign-In SDK) con { idToken, accessToken }. */
+    completeNativeGoogleSignIn: async (payload) => {
+        if (!auth) { App.state.authError = 'Firebase no está disponible.'; App.state.authLoading = false; App.render(); return; }
+        try {
+            const idToken = payload?.idToken;
+            const accessToken = payload?.accessToken || null;
+            if (!idToken) throw new Error('Token de Google incompleto.');
+            await signInWithCredential(auth, GoogleAuthProvider.credential(idToken, accessToken));
         } catch (e) {
             App.state.authError = authErrorMessage(e);
             App.state.authLoading = false;
@@ -2992,10 +3085,6 @@ const App = {
         e.preventDefault(); const f = e.target;
         const uForm = App.state.formTemp.usuario;
         let modulos = Array.isArray(uForm.modulosVisibles) ? [...uForm.modulosVisibles] : [];
-        App.navItems.forEach(item => {
-            const el = f.elements ? f.elements[`mod_${item.id}`] : f[`mod_${item.id}`];
-            if (el && el.checked && !modulos.includes(item.id)) modulos.push(item.id);
-        });
         if (!modulos.includes('dashboard')) modulos.unshift('dashboard');
         if (f.rol.value === 'admin') modulos = App.navItems.map(i => i.id);
 
@@ -3037,9 +3126,9 @@ const App = {
                         <h3 class="font-bold text-lg text-slate-800 flex items-center"><i data-lucide="users-cog" class="w-5 h-5 mr-2 text-indigo-600"></i> Gestión de Accesos y Usuarios</h3>
                         <p class="text-xs text-slate-500">Controle quién puede ver o alterar la estructura financiera de la aplicación.</p>
                     </div>
-                    <button onclick="window.App.openAddUsuario()" class="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-700 shadow-sm flex items-center transition-colors">
+                    <a href="${App.appLink(new URLSearchParams({ tab: 'config', nuevoUsuario: '1' }))}" class="donsebe-link bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-700 shadow-sm flex items-center transition-colors no-underline">
                         <i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Usuario
-                    </button>
+                    </a>
                 </div>
                 <div class="w-full overflow-x-auto table-scroll">
                     <table class="w-full text-left text-xs border-collapse">
@@ -3065,7 +3154,7 @@ const App = {
                                     </td>
                                     <td class="p-3 text-[10px] text-slate-500 font-bold border-r border-slate-100">${u.rol === 'admin' ? 'Todos los módulos' : `${(u.modulosVisibles || []).filter(m => m !== 'dashboard').length} módulos + Inicio`}</td>
                                     <td class="p-3 text-right">
-                                        <button onclick="window.App.editUsuario(${u.id})" class="text-blue-600 font-bold hover:underline mr-3">Editar</button>
+                                        <a href="${App.appLink(new URLSearchParams({ tab: 'config', editUsuario: String(u.id) }))}" class="donsebe-link text-blue-600 font-bold hover:underline mr-3">Editar</a>
                                         <button onclick="window.App.deleteUsuario(${u.id}, this)" class="text-red-600 font-bold hover:underline">Eliminar</button>
                                     </td>
                                 </tr>
@@ -3623,24 +3712,35 @@ const App = {
                     </div>
                     <div class="space-y-3 bg-slate-50 border border-slate-200 p-3 rounded-xl">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <label class="text-xs font-black text-slate-700 uppercase flex items-center"><i data-lucide="eye" class="w-4 h-4 mr-2 text-blue-500"></i> Módulos visibles en el menú</label>
+                            <label class="text-xs font-black text-slate-700 uppercase flex items-center"><i data-lucide="eye" class="w-4 h-4 mr-2 text-blue-500"></i> Módulos permitidos</label>
                             ${!isAdmin ? `<div class="flex gap-2">
-                                <button type="button" onclick="window.App.setUsuarioModulosTodos(true)" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-blue-100 text-blue-700">Activar todos</button>
-                                <button type="button" onclick="window.App.setUsuarioModulosTodos(false)" class="text-[10px] font-bold px-2 py-1 rounded-lg bg-slate-200 text-slate-600">Solo Inicio</button>
-                            </div>` : '<span class="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg">Admin: todos los módulos</span>'}
+                                <a href="${App.appLink(new URLSearchParams({ modulosTodos: '1' }))}" class="donsebe-link text-[10px] font-bold px-2 py-1 rounded-lg bg-blue-100 text-blue-700 no-underline">Activar todos</a>
+                                <a href="${App.appLink(new URLSearchParams({ modulosTodos: '0' }))}" class="donsebe-link text-[10px] font-bold px-2 py-1 rounded-lg bg-slate-200 text-slate-600 no-underline">Solo Inicio</a>
+                            </div>` : `<span class="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg">Admin: todos</span>`}
                         </div>
-                        <p class="text-[10px] text-slate-500">Toque cada módulo para habilitarlo o deshabilitarlo. El menú inferior se actualiza al guardar.</p>
+                        ${isAdmin ? `<p class="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">Para elegir módulos, cambie el rol a Operador: <a href="${App.appLink(new URLSearchParams({ usuarioRol: 'usuario' }))}" class="donsebe-link font-bold text-blue-700 underline">Usar rol Operador</a></p>` : `<p class="text-[10px] text-slate-500">${s.editingUsuarioId ? 'Edición de módulos activa.' : 'Defina qué verá en el menú.'} Toque cada módulo o use los enlaces internos <code class="text-[9px] bg-white px-1 rounded">donsebe://</code>.</p>`}
                         <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-52 overflow-y-auto pr-1">
                             ${App.navItems.map(item => {
                                 const enabled = isAdmin || mods.includes(item.id);
                                 const locked = item.id === 'dashboard';
+                                const toggleHref = App.appLink(new URLSearchParams({ toggleModulo: item.id }));
+                                if (locked) {
+                                    return `<div class="flex items-center space-x-2 p-2.5 rounded-xl border bg-blue-600 border-blue-600 text-white opacity-90" title="Siempre visible">
+                                        <i data-lucide="check-circle" class="w-4 h-4 shrink-0"></i>
+                                        <span class="text-[10px] sm:text-xs font-bold leading-tight">${item.label}</span>
+                                    </div>`;
+                                }
+                                if (isAdmin) {
+                                    return `<div class="flex items-center space-x-2 p-2.5 rounded-xl border bg-blue-600 border-blue-600 text-white opacity-80">
+                                        <i data-lucide="check-circle" class="w-4 h-4 shrink-0"></i>
+                                        <span class="text-[10px] sm:text-xs font-bold leading-tight">${item.label}</span>
+                                    </div>`;
+                                }
                                 return `
-                                <button type="button" ${locked || isAdmin ? 'disabled' : `onclick="window.App.toggleUsuarioModulo('${item.id}')"`}
-                                    class="flex items-center space-x-2 p-2.5 rounded-xl border text-left transition-all ${enabled ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'} ${locked || isAdmin ? 'opacity-90 cursor-default' : 'cursor-pointer active:scale-[0.98]'}">
+                                <a href="${toggleHref}" class="donsebe-link flex items-center space-x-2 p-2.5 rounded-xl border text-left transition-all no-underline ${enabled ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'} active:scale-[0.98]">
                                     <i data-lucide="${enabled ? 'check-circle' : 'circle'}" class="w-4 h-4 shrink-0"></i>
                                     <span class="text-[10px] sm:text-xs font-bold leading-tight">${item.label}</span>
-                                    <input type="checkbox" name="mod_${item.id}" ${enabled ? 'checked' : ''} class="sr-only" tabindex="-1" aria-hidden="true"/>
-                                </button>`;
+                                </a>`;
                             }).join('')}
                         </div>
                     </div>
@@ -3841,6 +3941,16 @@ const App = {
 /* ================================================================== */
 
 window.App = App;
+window.__donSebeCompleteNativeGoogleSignIn = (payload) => {
+    if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch (_) {} }
+    return App.completeNativeGoogleSignIn(payload);
+};
+window.__donSebeNativeGoogleSignInError = (message) => {
+    if (typeof message === 'string' && message.startsWith('"')) { try { message = JSON.parse(message); } catch (_) {} }
+    App.state.authError = message || 'Error al iniciar con Google.';
+    App.state.authLoading = false;
+    App.render();
+};
 
 
 /* ================================================================== */
@@ -3859,6 +3969,7 @@ window.App = App;
 
 async function bootApplication() {
     window.App.applyTheme();
+    App.bindAppLinks();
     window.App.render();
 
     try {
