@@ -626,7 +626,7 @@ const App = {
             if (editId) {
                 if (!App.canAccessModule('config')) { App.showAlert('Sin permiso.'); return true; }
                 if (App.state.activeTab !== 'config') App.setTab('config');
-                App.editUsuario(Number(editId));
+                App.editUsuario(editId);
                 return true;
             }
 
@@ -694,6 +694,39 @@ const App = {
     },
 
     canAccessModule: (moduleId) => App.getVisibleNavItems().some(i => i.id === moduleId),
+
+    findUsuarioById: (id) => {
+        const key = String(id);
+        return App.state.usuarios.find(u => String(u.id) === key || String(u.authUid) === key) || null;
+    },
+
+    parseModulosVisiblesFromUser: (raw) => {
+        if (Array.isArray(raw)) return raw.filter(Boolean);
+        if (raw && typeof raw === 'object') {
+            const on = Object.entries(raw).filter(([, v]) => v === true || v === 'true' || v === 1).map(([k]) => k);
+            if (on.length) return on;
+            return Object.keys(raw);
+        }
+        return [];
+    },
+
+    formatUsuarioModulosResumen: (u) => {
+        if (!u) return '—';
+        if (u.rol === 'admin') return 'Todos los módulos';
+        const mods = App.parseModulosVisiblesFromUser(u.modulosVisibles);
+        const extra = mods.filter(m => m !== 'dashboard');
+        if (!extra.length) return 'Solo Inicio (lectura del panel)';
+        const labels = extra.map(id => App.navItems.find(i => i.id === id)?.label || id);
+        const preview = labels.slice(0, 4).join(', ');
+        const more = labels.length > 4 ? ` +${labels.length - 4}` : '';
+        return `${extra.length} módulo${extra.length > 1 ? 's' : ''}: ${preview}${more}`;
+    },
+
+    formatUsuarioAccesoResumen: (u) => {
+        if (!u) return '—';
+        if (u.rol === 'admin') return 'Administrador (edición total)';
+        return u.permisoEdicion ? 'Operador con edición' : 'Solo lectura';
+    },
 
     renderAppNav: () => {
         const active = App.state.activeTab;
@@ -3091,13 +3124,31 @@ const App = {
     },
 
     editUsuario: (id) => {
-        const u = App.state.usuarios.find(x => x.id === id);
-        if (!u) return;
-        App.state.editingUsuarioId = id;
-        const mods = Array.isArray(u.modulosVisibles) ? [...u.modulosVisibles] : ['dashboard'];
+        const u = App.findUsuarioById(id);
+        if (!u) {
+            App.showAlert('No se encontró el usuario seleccionado.');
+            return;
+        }
+        App.state.editingUsuarioId = u.id;
+        let mods = App.parseModulosVisiblesFromUser(u.modulosVisibles);
+        if (!mods.length) mods = ['dashboard'];
         if (!mods.includes('dashboard')) mods.unshift('dashboard');
-        App.state.formTemp.usuario = { ...u, modulosVisibles: mods };
+        if (u.rol === 'admin') mods = App.navItems.map(i => i.id);
+        App.state.formTemp.usuario = {
+            ...u,
+            permisoEdicion: u.rol === 'admin' ? true : !!u.permisoEdicion,
+            modulosVisibles: mods
+        };
         App.state.isAddUsuarioOpen = true;
+        App.render();
+    },
+
+    setUsuarioPermisoEdicion: (puedeEditar) => {
+        if (App.state.formTemp.usuario.rol === 'admin') {
+            App.state.formTemp.usuario.permisoEdicion = true;
+        } else {
+            App.state.formTemp.usuario.permisoEdicion = !!puedeEditar;
+        }
         App.render();
     },
 
@@ -3134,33 +3185,48 @@ const App = {
         App.state.formTemp.usuario.rol = rol;
         if (rol === 'admin') {
             App.state.formTemp.usuario.modulosVisibles = App.navItems.map(i => i.id);
+            App.state.formTemp.usuario.permisoEdicion = true;
         }
         App.render();
     },
 
     submitUsuario: async (e) => {
-        e.preventDefault(); const f = e.target;
+        e.preventDefault();
+        const f = e.target;
         const uForm = App.state.formTemp.usuario;
+        const prev = App.state.editingUsuarioId ? App.findUsuarioById(App.state.editingUsuarioId) : null;
         let modulos = Array.isArray(uForm.modulosVisibles) ? [...uForm.modulosVisibles] : [];
         if (!modulos.includes('dashboard')) modulos.unshift('dashboard');
-        if (f.rol.value === 'admin') modulos = App.navItems.map(i => i.id);
+        const rol = f.rol.value;
+        if (rol === 'admin') modulos = App.navItems.map(i => i.id);
+
+        const permisoEdicion = rol === 'admin' ? true : (f.permisoEdicion?.value === '1' || f.permisoEdicion?.checked === true);
 
         const data = {
-            nombre: f.nombre.value,
+            nombre: f.nombre.value.trim(),
             email: (f.email?.value || '').trim().toLowerCase(),
-            rol: f.rol.value,
-            permisoEdicion: f.permisoEdicion.checked,
+            rol,
+            permisoEdicion,
             modulosVisibles: modulos,
-            authUid: App.state.editingUsuarioId ? (App.state.usuarios.find(x => x.id === App.state.editingUsuarioId)?.authUid || '') : ''
+            authUid: prev?.authUid || uForm.authUid || ''
         };
         const newId = App.state.editingUsuarioId || Date.now();
-        window.dbHelper.save('usuarios', newId, { id: newId, ...data });
+        const payload = { id: newId, ...data };
+        window.dbHelper.save('usuarios', newId, payload);
+
+        const profileUid = data.authUid || (String(newId).length > 12 ? String(newId) : '');
+        if (profileUid && window.isFirebaseReady && db && App.canEdit()) {
+            setDoc(userProfileRef(profileUid), payload, { merge: true }).catch(err => console.warn('Sync perfil usuario:', err));
+        }
 
         const uid = App.state.firebaseUser?.uid;
-        if (uid && (String(newId) === String(uid) || data.authUid === uid || data.email === App.state.firebaseUser?.email)) {
-            App.state.userProfile = { ...(App.state.userProfile || {}), ...data, id: newId };
+        if (uid && (String(newId) === String(uid) || data.authUid === uid || (data.email && data.email === App.state.firebaseUser?.email))) {
+            App.state.userProfile = { ...(App.state.userProfile || {}), ...payload };
+            App.state.userProfile.modulosVisibles = App.normalizeModulosVisibles(App.state.userProfile.modulosVisibles, App.state.userProfile.rol);
+            if (App.state.userProfile.rol === 'admin') App.state.userProfile.permisoEdicion = true;
             if (!App.canAccessModule(App.state.activeTab)) App.state.activeTab = 'dashboard';
         }
+        App.showAlert(`Perfil guardado: ${data.permisoEdicion ? 'puede editar' : 'solo lectura'}, ${modulos.filter(m => m !== 'dashboard').length} módulo(s) además de Inicio.`);
         App.closeModals();
     },
 
@@ -3183,9 +3249,9 @@ const App = {
                         <h3 class="font-bold text-lg text-slate-800 flex items-center"><i data-lucide="users-cog" class="w-5 h-5 mr-2 text-indigo-600"></i> Gestión de Accesos y Usuarios</h3>
                         <p class="text-xs text-slate-500">Controle quién puede ver o alterar la estructura financiera de la aplicación.</p>
                     </div>
-                    <a href="${App.appLink(new URLSearchParams({ tab: 'config', nuevoUsuario: '1' }))}" class="donsebe-link bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-700 shadow-sm flex items-center transition-colors no-underline">
+                    <button type="button" onclick="window.App.openAddUsuario()" class="bg-indigo-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-indigo-700 shadow-sm flex items-center transition-colors">
                         <i data-lucide="user-plus" class="w-4 h-4 mr-2"></i> Nuevo Usuario
-                    </a>
+                    </button>
                 </div>
                 <div class="w-full overflow-x-auto table-scroll">
                     <table class="w-full text-left text-xs border-collapse">
@@ -3193,8 +3259,8 @@ const App = {
                             <tr class="bg-slate-50 border-b text-slate-500 uppercase font-bold">
                                 <th class="p-3 border-r border-slate-200">Nombre / Usuario</th>
                                 <th class="p-3 border-r border-slate-200">Rol</th>
-                                <th class="p-3 text-center border-r border-slate-200">Permiso Edición</th>
-                                <th class="p-3 border-r border-slate-200">Visibilidad</th>
+                                <th class="p-3 text-center border-r border-slate-200">Acceso a datos</th>
+                                <th class="p-3 border-r border-slate-200">Módulos permitidos</th>
                                 <th class="p-3 text-right">Acciones</th>
                             </tr>
                         </thead>
@@ -3207,11 +3273,11 @@ const App = {
                                         <span class="px-2 py-1 rounded text-[10px] font-black uppercase ${u.rol === 'admin' ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'}">${u.rol}</span>
                                     </td>
                                     <td class="p-3 text-center border-r border-slate-100">
-                                        ${u.permisoEdicion ? '<span class="text-green-600 font-bold bg-green-50 px-2 py-1 rounded border border-green-200">SÍ</span>' : '<span class="text-red-500 font-bold bg-red-50 px-2 py-1 rounded border border-red-200">NO</span>'}
+                                        <span class="text-[10px] font-bold px-2 py-1 rounded border ${u.rol === 'admin' || u.permisoEdicion ? 'text-green-700 bg-green-50 border-green-200' : 'text-amber-800 bg-amber-50 border-amber-200'}">${App.formatUsuarioAccesoResumen(u)}</span>
                                     </td>
-                                    <td class="p-3 text-[10px] text-slate-500 font-bold border-r border-slate-100">${u.rol === 'admin' ? 'Todos los módulos' : `${(u.modulosVisibles || []).filter(m => m !== 'dashboard').length} módulos + Inicio`}</td>
-                                    <td class="p-3 text-right">
-                                        <a href="${App.appLink(new URLSearchParams({ tab: 'config', editUsuario: String(u.id) }))}" class="donsebe-link text-blue-600 font-bold hover:underline mr-3">Editar</a>
+                                    <td class="p-3 text-[10px] text-slate-600 font-medium border-r border-slate-100 max-w-[200px]" title="${App.formatUsuarioModulosResumen(u)}">${App.formatUsuarioModulosResumen(u)}</td>
+                                    <td class="p-3 text-right whitespace-nowrap">
+                                        <button type="button" onclick="window.App.editUsuario('${String(u.id).replace(/'/g, "\\'")}')" class="text-blue-600 font-bold hover:underline mr-3">Editar</button>
                                         <button onclick="window.App.deleteUsuario(${u.id}, this)" class="text-red-600 font-bold hover:underline">Eliminar</button>
                                     </td>
                                 </tr>
@@ -3742,66 +3808,86 @@ const App = {
                 <button type="submit" class="w-full bg-indigo-600 text-white font-black py-4 rounded-xl hover:bg-indigo-700 shadow-lg shadow-indigo-600/30 transition-all mt-4">Ejecutar Transferencia</button></form></div></div>`;
         }
 
-        // MODAL CREACIÓN DE USUARIO (RBAC)
+        // MODAL CREACIÓN / EDICIÓN DE USUARIO (RBAC)
         if (s.isAddUsuarioOpen) {
             const fUser = App.state.formTemp.usuario;
             const mods = Array.isArray(fUser.modulosVisibles) ? fUser.modulosVisibles : ['dashboard'];
             const isAdmin = fUser.rol === 'admin';
-            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass} max-h-[90vh] overflow-y-auto">
-                <div class="flex justify-between items-center mb-5"><h3 class="font-black text-xl text-slate-800">${s.editingUsuarioId ? 'Editar Perfil de Usuario' : 'Nuevo Perfil de Usuario'}</h3><button type="button" onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x"></i></button></div>
+            const puedeEditar = isAdmin || !!fUser.permisoEdicion;
+            const modCount = mods.filter(m => m !== 'dashboard').length;
+            h += `<div class="${modalContainerClass}"><div class="${modalBoxClass} max-h-[92vh] overflow-y-auto w-full max-w-lg">
+                <div class="flex justify-between items-start gap-3 mb-4">
+                    <div>
+                        <h3 class="font-black text-xl text-slate-800">${s.editingUsuarioId ? 'Editar accesos de usuario' : 'Nuevo usuario'}</h3>
+                        <p class="text-[11px] text-slate-500 mt-1">Defina si puede <strong>editar</strong> o solo <strong>consultar</strong>, y qué módulos verá en el menú.</p>
+                    </div>
+                    <button type="button" onclick="window.App.closeModals()" class="text-slate-400 hover:text-slate-600 shrink-0 p-1"><i data-lucide="x"></i></button>
+                </div>
                 <form onsubmit="window.App.submitUsuario(event)" class="space-y-4">
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Nombre / Usuario</label><input name="nombre" type="text" value="${fUser.nombre}" placeholder="Ej: Administrador" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
-                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Correo (vinculación Firebase)</label><input name="email" type="email" value="${fUser.email || ''}" placeholder="usuario@correo.com" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
+                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Nombre</label><input name="nombre" type="text" value="${(fUser.nombre || '').replace(/"/g, '&quot;')}" placeholder="Ej: Rossy Romero" required class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
+                        <div class="space-y-1"><label class="text-xs font-bold text-slate-500 uppercase">Correo (login Firebase)</label><input name="email" type="email" value="${(fUser.email || '').replace(/"/g, '&quot;')}" placeholder="correo@empresa.com" class="w-full border-2 border-slate-200 p-3 rounded-xl text-sm focus:border-blue-500 outline-none"/></div>
                     </div>
-                    <div class="flex flex-col sm:flex-row sm:items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
-                        <div class="flex-1 space-y-1">
-                            <label class="text-xs font-bold text-slate-500 uppercase">Privilegio de Sistema</label>
-                            <select name="rol" onchange="window.App.setUsuarioRol(this.value)" class="w-full bg-white border border-slate-300 p-2 rounded-lg font-bold text-xs outline-none">
-                                <option value="usuario" ${fUser.rol==='usuario'?'selected':''}>Usuario Operador (Básico)</option>
-                                <option value="admin" ${fUser.rol==='admin'?'selected':''}>Administrador Maestro</option>
-                            </select>
-                        </div>
-                        <label class="flex items-center space-x-2 cursor-pointer shrink-0">
-                            <input name="permisoEdicion" type="checkbox" ${fUser.permisoEdicion?'checked':''} class="w-5 h-5 rounded text-blue-600 border-slate-300"/>
-                            <span class="text-xs font-bold text-slate-700 leading-tight">Permitir edición<br><span class="text-[9px] font-normal text-slate-500">(escritura en BD)</span></span>
-                        </label>
+
+                    <div class="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+                        <label class="text-xs font-black text-slate-700 uppercase flex items-center"><i data-lucide="shield" class="w-4 h-4 mr-2 text-indigo-600"></i> Rol del sistema</label>
+                        <select name="rol" onchange="window.App.setUsuarioRol(this.value)" class="w-full bg-white border border-slate-300 p-2.5 rounded-lg font-bold text-xs outline-none">
+                            <option value="usuario" ${fUser.rol==='usuario'?'selected':''}>Operador (permisos personalizados)</option>
+                            <option value="admin" ${fUser.rol==='admin'?'selected':''}>Administrador (acceso total)</option>
+                        </select>
                     </div>
-                    <div class="space-y-3 bg-slate-50 border border-slate-200 p-3 rounded-xl">
+
+                    <div class="p-3 rounded-xl border-2 ${puedeEditar ? 'border-green-200 bg-green-50' : 'border-amber-200 bg-amber-50'} space-y-3">
+                        <label class="text-xs font-black text-slate-800 uppercase flex items-center"><i data-lucide="pencil-line" class="w-4 h-4 mr-2 ${puedeEditar ? 'text-green-600' : 'text-amber-600'}"></i> Permiso sobre los datos</label>
+                        ${isAdmin ? `<p class="text-[10px] text-indigo-800 bg-white/80 rounded-lg p-2 border border-indigo-100">El administrador siempre puede crear, modificar y eliminar registros.</p>
+                        <input type="hidden" name="permisoEdicion" value="1"/>` : `
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <label class="flex items-start gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all ${!puedeEditar ? 'border-amber-500 bg-white shadow-sm' : 'border-slate-200 bg-white/60'}">
+                                <input type="radio" name="permisoEdicion" value="0" ${!puedeEditar ? 'checked' : ''} onchange="window.App.setUsuarioPermisoEdicion(false)" class="mt-0.5"/>
+                                <span><span class="block text-xs font-black text-slate-800">Solo lectura</span><span class="block text-[10px] text-slate-500 mt-0.5">Puede ver reportes y módulos asignados, sin guardar cambios.</span></span>
+                            </label>
+                            <label class="flex items-start gap-2 p-3 rounded-xl border-2 cursor-pointer transition-all ${puedeEditar ? 'border-green-500 bg-white shadow-sm' : 'border-slate-200 bg-white/60'}">
+                                <input type="radio" name="permisoEdicion" value="1" ${puedeEditar ? 'checked' : ''} onchange="window.App.setUsuarioPermisoEdicion(true)" class="mt-0.5"/>
+                                <span><span class="block text-xs font-black text-slate-800">Puede editar</span><span class="block text-[10px] text-slate-500 mt-0.5">Registrar viajes, movimientos, clientes y demás operaciones.</span></span>
+                            </label>
+                        </div>`}
+                    </div>
+
+                    <div class="p-3 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
                         <div class="flex flex-wrap items-center justify-between gap-2">
-                            <label class="text-xs font-black text-slate-700 uppercase flex items-center"><i data-lucide="eye" class="w-4 h-4 mr-2 text-blue-500"></i> Módulos permitidos</label>
-                            ${!isAdmin ? `<div class="flex gap-2">
-                                <a href="${App.appLink(new URLSearchParams({ modulosTodos: '1' }))}" class="donsebe-link text-[10px] font-bold px-2 py-1 rounded-lg bg-blue-100 text-blue-700 no-underline">Activar todos</a>
-                                <a href="${App.appLink(new URLSearchParams({ modulosTodos: '0' }))}" class="donsebe-link text-[10px] font-bold px-2 py-1 rounded-lg bg-slate-200 text-slate-600 no-underline">Solo Inicio</a>
-                            </div>` : `<span class="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg">Admin: todos</span>`}
+                            <label class="text-xs font-black text-slate-700 uppercase flex items-center"><i data-lucide="layout-grid" class="w-4 h-4 mr-2 text-blue-500"></i> Módulos que puede revisar</label>
+                            <span class="text-[10px] font-bold text-slate-500">${isAdmin ? 'Todos' : modCount + ' seleccionados'}</span>
                         </div>
-                        ${isAdmin ? `<p class="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">Para elegir módulos, cambie el rol a Operador: <a href="${App.appLink(new URLSearchParams({ usuarioRol: 'usuario' }))}" class="donsebe-link font-bold text-blue-700 underline">Usar rol Operador</a></p>` : `<p class="text-[10px] text-slate-500">${s.editingUsuarioId ? 'Edición de módulos activa.' : 'Defina qué verá en el menú.'} Toque cada módulo o use los enlaces internos <code class="text-[9px] bg-white px-1 rounded">donsebe://</code>.</p>`}
-                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-52 overflow-y-auto pr-1">
+                        ${isAdmin ? `<p class="text-[10px] text-slate-600">Como administrador ve todos los módulos. Para limitar el menú, elija rol <button type="button" onclick="window.App.setUsuarioRol('usuario')" class="font-bold text-blue-700 underline">Operador</button>.</p>` : `
+                        <p class="text-[10px] text-slate-500">Toque cada módulo para activarlo o quitarlo del menú del usuario. <strong>Inicio</strong> siempre está disponible.</p>
+                        <div class="flex flex-wrap gap-2">
+                            <button type="button" onclick="window.App.setUsuarioModulosTodos(true)" class="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-blue-100 text-blue-800">Marcar todos</button>
+                            <button type="button" onclick="window.App.setUsuarioModulosTodos(false)" class="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-slate-200 text-slate-700">Solo Inicio</button>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1">
                             ${App.navItems.map(item => {
-                                const enabled = isAdmin || mods.includes(item.id);
+                                const enabled = mods.includes(item.id);
                                 const locked = item.id === 'dashboard';
-                                const toggleHref = App.appLink(new URLSearchParams({ toggleModulo: item.id }));
                                 if (locked) {
-                                    return `<div class="flex items-center space-x-2 p-2.5 rounded-xl border bg-blue-600 border-blue-600 text-white opacity-90" title="Siempre visible">
-                                        <i data-lucide="check-circle" class="w-4 h-4 shrink-0"></i>
-                                        <span class="text-[10px] sm:text-xs font-bold leading-tight">${item.label}</span>
+                                    return `<div class="flex items-center gap-2 p-2.5 rounded-xl border bg-blue-600 border-blue-600 text-white" title="Siempre visible">
+                                        <i data-lucide="home" class="w-4 h-4 shrink-0"></i>
+                                        <span class="text-[10px] font-bold leading-tight">${item.label}</span>
                                     </div>`;
                                 }
                                 if (isAdmin) {
-                                    return `<div class="flex items-center space-x-2 p-2.5 rounded-xl border bg-blue-600 border-blue-600 text-white opacity-80">
+                                    return `<div class="flex items-center gap-2 p-2.5 rounded-xl border bg-indigo-100 border-indigo-200 text-indigo-900 opacity-90">
                                         <i data-lucide="check-circle" class="w-4 h-4 shrink-0"></i>
-                                        <span class="text-[10px] sm:text-xs font-bold leading-tight">${item.label}</span>
+                                        <span class="text-[10px] font-bold leading-tight">${item.label}</span>
                                     </div>`;
                                 }
-                                return `
-                                <a href="${toggleHref}" class="donsebe-link flex items-center space-x-2 p-2.5 rounded-xl border text-left transition-all no-underline ${enabled ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300'} active:scale-[0.98]">
+                                return `<button type="button" onclick="window.App.toggleUsuarioModulo('${item.id}')" class="flex items-center gap-2 p-2.5 rounded-xl border text-left transition-all ${enabled ? 'bg-blue-600 border-blue-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:border-blue-400 active:scale-[0.98]'}">
                                     <i data-lucide="${enabled ? 'check-circle' : 'circle'}" class="w-4 h-4 shrink-0"></i>
-                                    <span class="text-[10px] sm:text-xs font-bold leading-tight">${item.label}</span>
-                                </a>`;
+                                    <span class="text-[10px] font-bold leading-tight">${item.label}</span>
+                                </button>`;
                             }).join('')}
-                        </div>
+                        </div>`}
                     </div>
-                    <button type="submit" class="w-full bg-indigo-600 text-white font-black py-4 rounded-xl hover:bg-indigo-700 shadow-lg transition-colors mt-2 flex items-center justify-center"><i data-lucide="save" class="w-5 h-5 mr-2"></i> Guardar Perfil de Usuario</button>
+                    <button type="submit" class="w-full bg-indigo-600 text-white font-black py-4 rounded-xl hover:bg-indigo-700 shadow-lg transition-colors flex items-center justify-center"><i data-lucide="save" class="w-5 h-5 mr-2"></i> Guardar permisos</button>
                 </form>
             </div></div>`;
         }
@@ -4221,8 +4307,16 @@ const startBidirectionalSync = () => {
                 }
 
                 if (col === 'usuarios' && window.App.state.firebaseUser) {
-                    const mine = window.App.state.usuarios.find(u => String(u.id) === String(window.App.state.firebaseUser.uid) || u.authUid === window.App.state.firebaseUser.uid);
-                    if (mine) window.App.state.userProfile = mine;
+                    const uid = window.App.state.firebaseUser.uid;
+                    const email = (window.App.state.firebaseUser.email || '').toLowerCase();
+                    const mine = window.App.state.usuarios.find(u =>
+                        String(u.id) === String(uid) || u.authUid === uid || (email && (u.email || '').toLowerCase() === email)
+                    );
+                    if (mine) {
+                        mine.modulosVisibles = App.normalizeModulosVisibles(mine.modulosVisibles, mine.rol);
+                        if (mine.rol === 'admin') mine.permisoEdicion = true;
+                        window.App.state.userProfile = mine;
+                    }
                 }
 
                 updateSyncUI();
