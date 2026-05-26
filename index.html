@@ -3,7 +3,7 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Don Sebe ERP</title>
     <meta name="application-name" content="Don Sebe ERP">
     <meta name="theme-color" content="#2563eb">
@@ -29,6 +29,25 @@
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <style>
+        html, body {
+            height: 100%;
+            height: 100dvh;
+            margin: 0;
+            overflow: hidden;
+            -webkit-text-size-adjust: 100%;
+        }
+        #app-root {
+            display: flex;
+            flex-direction: column;
+            min-height: 100dvh;
+            height: 100dvh;
+            width: 100%;
+            overflow: hidden;
+            box-sizing: border-box;
+            padding-top: env(safe-area-inset-top, 0px);
+            padding-left: env(safe-area-inset-left, 0px);
+            padding-right: env(safe-area-inset-right, 0px);
+        }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
         @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
@@ -42,16 +61,41 @@
         .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
         .table-scroll { -webkit-overflow-scrolling: touch; }
 
-        /* Navegación fija: módulos siempre visibles (PWA / móvil) */
+        /* Navegación fija: módulos siempre visibles (PWA / móvil / iOS) */
         .app-bottom-nav {
-            padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+            padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
+            padding-left: env(safe-area-inset-left, 0px);
+            padding-right: env(safe-area-inset-right, 0px);
+        }
+        .app-bottom-nav-inner {
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            gap: 0.35rem;
+            padding: 0.4rem 0.5rem 0.25rem;
+            max-width: 100%;
+            -webkit-overflow-scrolling: touch;
+            scroll-snap-type: x proximity;
+            scrollbar-width: none;
+        }
+        .app-bottom-nav-inner::-webkit-scrollbar { display: none; }
+        .app-bottom-nav-item {
+            flex: 0 0 auto;
+            min-width: 4.35rem;
+            max-width: 5.25rem;
+            scroll-snap-align: start;
+        }
+        .app-bottom-nav-item--locked {
+            opacity: 0.42;
         }
         a.donsebe-link { color: inherit; -webkit-tap-highlight-color: transparent; }
         .app-main-with-nav {
-            padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+            padding-bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
         }
         @media (min-width: 768px) {
-            .app-main-with-nav { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); }
+            .app-main-with-nav { padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)); }
+            .app-bottom-nav-inner { justify-content: center; flex-wrap: wrap; overflow-x: visible; }
         }
 
         /* NUEVO: Cámara de Renderizado para Exportación PDF Perfecta */
@@ -622,15 +666,26 @@ const App = {
         }, true);
     },
 
+    normalizeModulosVisibles: (raw, rol) => {
+        const all = App.navItems.map(i => i.id);
+        if (rol === 'admin') return all;
+        let list = [];
+        if (Array.isArray(raw)) list = raw.filter(Boolean);
+        else if (raw && typeof raw === 'object') {
+            list = Object.entries(raw).filter(([, v]) => v === true || v === 'true' || v === 1).map(([k]) => k);
+            if (!list.length) list = Object.keys(raw);
+        }
+        if (!list.length) list = ['dashboard'];
+        const visible = new Set(list);
+        visible.add('dashboard');
+        return all.filter(id => visible.has(id));
+    },
+
     getVisibleNavItems: () => {
         const p = App.state.userProfile;
         if (!p) return App.navItems.filter(i => i.id === 'dashboard');
-        if (p.rol === 'admin') return App.navItems;
-        const raw = p.modulosVisibles;
-        const list = Array.isArray(raw) ? raw : (raw ? Object.values(raw) : []);
-        const visible = new Set(list);
-        visible.add('dashboard');
-        return App.navItems.filter(i => visible.has(i.id));
+        const allowed = new Set(App.normalizeModulosVisibles(p.modulosVisibles, p.rol));
+        return App.navItems.filter(i => allowed.has(i.id));
     },
 
     canEdit: () => {
@@ -642,18 +697,20 @@ const App = {
 
     renderAppNav: () => {
         const active = App.state.activeTab;
-        const items = App.getVisibleNavItems();
+        const allowedIds = new Set(App.getVisibleNavItems().map(i => i.id));
         return `
             <nav class="app-bottom-nav fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-4px_20px_rgba(15,23,42,0.08)] print:hidden" aria-label="Módulos del sistema">
-                <div class="flex overflow-x-auto hide-scroll gap-0.5 px-1.5 pt-1.5 max-w-6xl mx-auto">
-                    ${items.map(item => {
+                <div class="app-bottom-nav-inner max-w-6xl mx-auto w-full">
+                    ${App.navItems.map(item => {
                         const isActive = active === item.id;
+                        const allowed = allowedIds.has(item.id);
                         const href = App.appLink(new URLSearchParams({ tab: item.id }));
+                        const title = allowed ? item.label : `${item.label} (sin permiso)`;
                         return `
-                        <a href="${href}" title="${item.label}" role="tab" aria-selected="${isActive}"
-                            class="donsebe-link shrink-0 flex flex-col items-center justify-center min-w-[4.25rem] max-w-[5.5rem] flex-1 px-1 py-1.5 rounded-xl transition-colors no-underline ${isActive ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100 active:bg-slate-200'}">
-                            <i data-lucide="${item.icon}" class="w-5 h-5 mb-0.5 ${isActive ? 'text-white' : 'text-slate-500'}"></i>
-                            <span class="text-[9px] sm:text-[10px] font-bold leading-tight text-center truncate w-full px-0.5">${item.label}</span>
+                        <a href="${href}" title="${title}" role="tab" aria-selected="${isActive}" aria-disabled="${allowed ? 'false' : 'true'}"
+                            class="donsebe-link app-bottom-nav-item flex flex-col items-center justify-center px-1 py-1.5 rounded-xl transition-colors no-underline ${allowed ? '' : 'app-bottom-nav-item--locked'} ${isActive && allowed ? 'bg-blue-600 text-white shadow-md' : allowed ? 'text-slate-600 hover:bg-slate-100 active:bg-slate-200' : 'text-slate-400'}">
+                            <i data-lucide="${allowed ? item.icon : 'lock'}" class="w-5 h-5 mb-0.5 shrink-0 ${isActive && allowed ? 'text-white' : allowed ? 'text-slate-500' : 'text-slate-400'}"></i>
+                            <span class="text-[9px] font-bold leading-tight text-center truncate w-full px-0.5">${item.label}</span>
                         </a>`;
                     }).join('')}
                 </div>
@@ -3793,19 +3850,19 @@ const App = {
             <div class="flex flex-col h-full min-h-0 w-full">
             ${App.renderModals()}
             
-            <header class="bg-white border-b border-slate-200 p-4 flex justify-between items-center z-10 shrink-0 print:hidden shadow-sm sticky top-0 gap-2">
-                <div class="flex items-center min-w-0">
-                    ${App.state.activeTab !== 'dashboard' ? `<button onclick="window.App.setTab('dashboard')" class="mr-3 sm:mr-4 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors shrink-0"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
-                    <h1 onclick="window.App.setTab('dashboard')" class="text-lg sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors truncate"><i data-lucide="anchor" class="mr-2 text-blue-600 w-5 h-5 sm:w-6 sm:h-6 shrink-0"></i> Don Sebe</h1>
+            <header class="app-shell-header bg-white border-b border-slate-200 px-3 py-2.5 sm:p-4 flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-center z-10 shrink-0 print:hidden shadow-sm">
+                <div class="flex items-center min-w-0 w-full sm:w-auto">
+                    ${App.state.activeTab !== 'dashboard' ? `<button onclick="window.App.setTab('dashboard')" class="mr-2 sm:mr-3 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors shrink-0"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
+                    <h1 onclick="window.App.setTab('dashboard')" class="text-base sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors truncate min-w-0"><i data-lucide="anchor" class="mr-1.5 sm:mr-2 text-blue-600 w-5 h-5 shrink-0"></i><span class="truncate">Don Sebe</span></h1>
                 </div>
-                <div class="flex items-center gap-2 shrink-0">
-                    <div title="${App.getSyncStatus().title}" class="hidden sm:flex bg-slate-900 text-white px-3 py-1.5 rounded-full text-[10px] font-bold shadow-md items-center">
-                        <div class="w-2 h-2 ${App.getSyncStatus().dot} rounded-full mr-2"></div>
-                        <span class="truncate max-w-[100px]">${App.getSyncStatus().label}</span>
+                <div class="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto shrink-0">
+                    <div title="${App.getSyncStatus().title}" class="flex bg-slate-900 text-white px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-bold shadow-md items-center max-w-[42%] sm:max-w-none">
+                        <div class="w-1.5 h-1.5 sm:w-2 sm:h-2 ${App.getSyncStatus().dot} rounded-full mr-1.5 shrink-0"></div>
+                        <span class="truncate">${App.getSyncStatus().label}</span>
                     </div>
-                    <div class="flex items-center gap-2 bg-slate-100 pl-3 pr-1 py-1 rounded-full border border-slate-200">
-                        <span class="text-[10px] sm:text-xs font-bold text-slate-700 max-w-[90px] truncate" title="${profileLabel}">${profileLabel}</span>
-                        <button type="button" onclick="window.App.signOut()" title="Cerrar sesión" class="p-1.5 rounded-full hover:bg-red-50 text-slate-500 hover:text-red-600"><i data-lucide="log-out" class="w-4 h-4"></i></button>
+                    <div class="flex items-center gap-1.5 bg-slate-100 pl-2 pr-1 py-1 rounded-full border border-slate-200 max-w-[52%] sm:max-w-none">
+                        <span class="text-[10px] sm:text-xs font-bold text-slate-700 truncate" title="${profileLabel}">${profileLabel}</span>
+                        <button type="button" onclick="window.App.signOut()" title="Cerrar sesión" class="p-1.5 rounded-full hover:bg-red-50 text-slate-500 hover:text-red-600 shrink-0"><i data-lucide="log-out" class="w-4 h-4"></i></button>
                     </div>
                 </div>
             </header>
@@ -4104,7 +4161,12 @@ const handleAuthSession = async (user) => {
     currentUser = user;
     App.state.firebaseUser = user;
     try {
-        App.state.userProfile = await resolveUserProfile(user);
+        const profile = await resolveUserProfile(user);
+        profile.modulosVisibles = App.normalizeModulosVisibles(profile.modulosVisibles, profile.rol);
+        if (profile.rol === 'admin') {
+            profile.permisoEdicion = true;
+        }
+        App.state.userProfile = profile;
         await ensureEmptyProjectMetadata();
         startBidirectionalSync();
         App.state.authError = null;
