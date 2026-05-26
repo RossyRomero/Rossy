@@ -61,41 +61,104 @@
         .hide-scroll { -ms-overflow-style: none; scrollbar-width: none; }
         .table-scroll { -webkit-overflow-scrolling: touch; }
 
-        /* Navegación fija: módulos siempre visibles (PWA / móvil / iOS) */
-        .app-bottom-nav {
-            padding-bottom: max(0.35rem, env(safe-area-inset-bottom, 0px));
-            padding-left: env(safe-area-inset-left, 0px);
-            padding-right: env(safe-area-inset-right, 0px);
-        }
-        .app-bottom-nav-inner {
-            display: flex;
-            flex-wrap: nowrap;
-            overflow-x: auto;
-            overflow-y: hidden;
-            gap: 0.35rem;
-            padding: 0.4rem 0.5rem 0.25rem;
-            max-width: 100%;
-            -webkit-overflow-scrolling: touch;
-            scroll-snap-type: x proximity;
-            scrollbar-width: none;
-        }
-        .app-bottom-nav-inner::-webkit-scrollbar { display: none; }
-        .app-bottom-nav-item {
-            flex: 0 0 auto;
-            min-width: 4.35rem;
-            max-width: 5.25rem;
-            scroll-snap-align: start;
-        }
-        .app-bottom-nav-item--locked {
-            opacity: 0.42;
-        }
+        /* Navegación móvil: barra fija + cuadrícula de módulos (sin scroll horizontal) */
         a.donsebe-link { color: inherit; -webkit-tap-highlight-color: transparent; }
         .app-main-with-nav {
-            padding-bottom: calc(4.75rem + env(safe-area-inset-bottom, 0px));
+            padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px));
         }
         @media (min-width: 768px) {
-            .app-main-with-nav { padding-bottom: calc(4.25rem + env(safe-area-inset-bottom, 0px)); }
-            .app-bottom-nav-inner { justify-content: center; flex-wrap: wrap; overflow-x: visible; }
+            .app-main-with-nav { padding-bottom: calc(7.5rem + env(safe-area-inset-bottom, 0px)); }
+        }
+        .app-bottom-bar {
+            padding: 0.4rem 0.65rem max(0.45rem, env(safe-area-inset-bottom, 0px));
+            padding-left: max(0.65rem, env(safe-area-inset-left, 0px));
+            padding-right: max(0.65rem, env(safe-area-inset-right, 0px));
+        }
+        .app-bottom-bar-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.15rem;
+            min-height: 3rem;
+            border-radius: 0.85rem;
+            font-size: 0.65rem;
+            font-weight: 800;
+            border: none;
+            cursor: pointer;
+            transition: background 0.15s, transform 0.1s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .app-bottom-bar-btn:active { transform: scale(0.97); }
+        .app-modules-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.5rem;
+        }
+        @media (min-width: 640px) {
+            .app-modules-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.65rem; }
+        }
+        @media (min-width: 1024px) {
+            .app-modules-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+        }
+        .app-module-tile {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.35rem;
+            padding: 0.75rem 0.35rem;
+            border-radius: 1rem;
+            border: 2px solid #e2e8f0;
+            background: #fff;
+            text-align: center;
+            min-height: 4.5rem;
+            cursor: pointer;
+            transition: border-color 0.15s, background 0.15s, box-shadow 0.15s, transform 0.1s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .app-module-tile:active:not(:disabled) { transform: scale(0.98); }
+        .app-module-tile--active {
+            border-color: #2563eb;
+            background: linear-gradient(180deg, #eff6ff 0%, #fff 100%);
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.2);
+        }
+        .app-module-tile--locked {
+            opacity: 0.45;
+            cursor: not-allowed;
+            background: #f8fafc;
+        }
+        .app-modules-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 45;
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(2px);
+            animation: fadeIn 0.2s ease-in-out;
+        }
+        .app-modules-sheet {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            max-height: min(88vh, 640px);
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            background: #fff;
+            border-radius: 1.25rem 1.25rem 0 0;
+            padding: 1rem 1rem max(1rem, env(safe-area-inset-bottom, 0px));
+            box-shadow: 0 -12px 40px rgba(15, 23, 42, 0.15);
+            animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        .app-nav-desktop-grid {
+            display: none;
+        }
+        @media (min-width: 768px) {
+            .app-nav-mobile-only { display: none !important; }
+            .app-nav-desktop-grid {
+                display: block;
+                padding: 0.5rem 0.75rem max(0.5rem, env(safe-area-inset-bottom, 0px));
+            }
         }
 
         /* NUEVO: Cámara de Renderizado para Exportación PDF Perfecta */
@@ -506,6 +569,7 @@ const App = {
         selectedViaje: null, selectedCliente: null, selectedSocio: null,
         isAddViajeOpen: false, isAddClienteOpen: false, isAddNominaOpen: false, isAddSocioOpen: false, isTransferOpen: false, isAddCuentaOpen: false, isAddTransaccionOpen: false,
         isAddUsuarioOpen: false, // NUEVO: Estado del modal de usuarios
+        modulesMenuOpen: false,
         editingViajeId: null, editingClienteId: null, editingSocioId: null, editingCuentaId: null, editingUsuarioId: null,
 
         numpad: { isOpen: false, targetField: null, targetLabel: '', targetForm: 'viaje', value: '0' },
@@ -573,7 +637,7 @@ const App = {
 
     isAnyModalOpen: () => {
         const s = App.state;
-        return s.isAddViajeOpen || s.isAddClienteOpen || s.isAddNominaOpen || s.isAddSocioOpen || s.isTransferOpen || s.isAddCuentaOpen || s.isAddTransaccionOpen || s.isPagoCarteraOpen || s.isAddUsuarioOpen || s.numpad.isOpen || s.alertMsg !== null;
+        return s.isAddViajeOpen || s.isAddClienteOpen || s.isAddNominaOpen || s.isAddSocioOpen || s.isTransferOpen || s.isAddCuentaOpen || s.isAddTransaccionOpen || s.isPagoCarteraOpen || s.isAddUsuarioOpen || s.modulesMenuOpen || s.numpad.isOpen || s.alertMsg !== null;
     },
 
     // MÓDULO DE ALERTAS CUSTOMIZADAS (Remplaza a los 'alert' nativos prohibidos),
@@ -591,8 +655,27 @@ const App = {
         }
         App.state.activeTab = tab;
         App.state.isFabOpen = false;
+        App.state.modulesMenuOpen = false;
         App.render();
     },
+
+    toggleModulesMenu: () => {
+        App.state.modulesMenuOpen = !App.state.modulesMenuOpen;
+        App.render();
+    },
+
+    closeModulesMenu: () => {
+        if (!App.state.modulesMenuOpen) return;
+        App.state.modulesMenuOpen = false;
+        App.render();
+    },
+
+    goToModule: (moduleId) => {
+        App.closeModulesMenu();
+        App.setTab(moduleId);
+    },
+
+    getActiveNavItem: () => App.navItems.find(i => i.id === App.state.activeTab) || App.navItems[0],
 
     /** Enlace interno de la app (sin HTML externo). Ej: donsebe://app?tab=viajes */
     appLink: (params) => {
@@ -728,24 +811,71 @@ const App = {
         return u.permisoEdicion ? 'Operador con edición' : 'Solo lectura';
     },
 
-    renderAppNav: () => {
+    renderModulosGrid: (opts = {}) => {
+        const { showHeading = true, compact = false } = opts;
         const active = App.state.activeTab;
         const allowedIds = new Set(App.getVisibleNavItems().map(i => i.id));
         return `
-            <nav class="app-bottom-nav fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-[0_-4px_20px_rgba(15,23,42,0.08)] print:hidden" aria-label="Módulos del sistema">
-                <div class="app-bottom-nav-inner max-w-6xl mx-auto w-full">
-                    ${App.navItems.map(item => {
-                        const isActive = active === item.id;
-                        const allowed = allowedIds.has(item.id);
-                        const href = App.appLink(new URLSearchParams({ tab: item.id }));
-                        const title = allowed ? item.label : `${item.label} (sin permiso)`;
-                        return `
-                        <a href="${href}" title="${title}" role="tab" aria-selected="${isActive}" aria-disabled="${allowed ? 'false' : 'true'}"
-                            class="donsebe-link app-bottom-nav-item flex flex-col items-center justify-center px-1 py-1.5 rounded-xl transition-colors no-underline ${allowed ? '' : 'app-bottom-nav-item--locked'} ${isActive && allowed ? 'bg-blue-600 text-white shadow-md' : allowed ? 'text-slate-600 hover:bg-slate-100 active:bg-slate-200' : 'text-slate-400'}">
-                            <i data-lucide="${allowed ? item.icon : 'lock'}" class="w-5 h-5 mb-0.5 shrink-0 ${isActive && allowed ? 'text-white' : allowed ? 'text-slate-500' : 'text-slate-400'}"></i>
-                            <span class="text-[9px] font-bold leading-tight text-center truncate w-full px-0.5">${item.label}</span>
-                        </a>`;
-                    }).join('')}
+            ${showHeading ? `<div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-black text-slate-800 flex items-center"><i data-lucide="layout-grid" class="w-4 h-4 mr-2 text-blue-600"></i> Módulos del sistema</h3>
+                <span class="text-[10px] font-bold text-slate-400 uppercase">Toque para abrir</span>
+            </div>` : ''}
+            <div class="app-modules-grid ${compact ? 'gap-2' : ''}">
+                ${App.navItems.map(item => {
+                    const allowed = allowedIds.has(item.id);
+                    const isActive = active === item.id;
+                    const locked = !allowed;
+                    return `<button type="button" ${locked ? 'disabled' : ''} onclick="window.App.goToModule('${item.id}')" title="${locked ? item.label + ' (sin permiso)' : item.label}"
+                        class="app-module-tile ${isActive && allowed ? 'app-module-tile--active' : ''} ${locked ? 'app-module-tile--locked' : 'hover:border-blue-400 hover:shadow-md'}">
+                        <span class="w-10 h-10 rounded-xl flex items-center justify-center ${isActive && allowed ? 'bg-blue-600 text-white' : locked ? 'bg-slate-100 text-slate-400' : 'bg-slate-100 text-blue-600'}">
+                            <i data-lucide="${locked ? 'lock' : item.icon}" class="w-5 h-5"></i>
+                        </span>
+                        <span class="text-[10px] sm:text-xs font-black text-slate-800 leading-tight px-0.5">${item.label}</span>
+                    </button>`;
+                }).join('')}
+            </div>`;
+    },
+
+    renderModulesMenuSheet: () => {
+        if (!App.state.modulesMenuOpen) return '';
+        return `
+            <div class="app-modules-overlay app-nav-mobile-only print:hidden" onclick="window.App.closeModulesMenu()" role="presentation">
+                <div class="app-modules-sheet max-w-6xl mx-auto" onclick="event.stopPropagation()" role="dialog" aria-label="Todos los módulos">
+                    <div class="flex items-center justify-between mb-4 sticky top-0 bg-white pt-1 pb-2 z-10 border-b border-slate-100">
+                        <h3 class="font-black text-lg text-slate-800 flex items-center"><i data-lucide="layout-grid" class="w-5 h-5 mr-2 text-blue-600"></i> Módulos</h3>
+                        <button type="button" onclick="window.App.closeModulesMenu()" class="p-2 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200" aria-label="Cerrar"><i data-lucide="x" class="w-5 h-5"></i></button>
+                    </div>
+                    ${App.renderModulosGrid({ showHeading: false })}
+                    <button type="button" onclick="window.App.goToModule('dashboard')" class="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-slate-900 text-white font-black text-sm">
+                        <i data-lucide="home" class="w-4 h-4"></i> Ir al inicio (Dashboard)
+                    </button>
+                </div>
+            </div>`;
+    },
+
+    renderAppNav: () => {
+        const active = App.state.activeTab;
+        const current = App.getActiveNavItem();
+        const isHome = active === 'dashboard';
+        return `
+            ${App.renderModulesMenuSheet()}
+            <nav class="fixed bottom-0 left-0 right-0 z-40 bg-white/98 backdrop-blur-md border-t border-slate-200 shadow-[0_-4px_24px_rgba(15,23,42,0.1)] print:hidden" aria-label="Navegación principal">
+                <div class="app-nav-desktop-grid max-w-6xl mx-auto w-full border-b border-slate-100">
+                    ${App.renderModulosGrid({ showHeading: false, compact: true })}
+                </div>
+                <div class="app-bottom-bar app-nav-mobile-only max-w-6xl mx-auto w-full grid grid-cols-3 gap-2">
+                    <button type="button" onclick="window.App.goToModule('dashboard')" class="app-bottom-bar-btn ${isHome ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}" aria-current="${isHome ? 'page' : 'false'}">
+                        <i data-lucide="home" class="w-5 h-5"></i>
+                        <span>Inicio</span>
+                    </button>
+                    <button type="button" onclick="window.App.toggleModulesMenu()" class="app-bottom-bar-btn bg-slate-50 text-slate-800 border border-slate-200 hover:bg-blue-50 hover:border-blue-200 min-w-0 px-1">
+                        <i data-lucide="${current.icon}" class="w-5 h-5 text-blue-600 shrink-0"></i>
+                        <span class="truncate w-full text-center leading-tight px-0.5">${current.label}</span>
+                    </button>
+                    <button type="button" onclick="window.App.toggleModulesMenu()" class="app-bottom-bar-btn ${App.state.modulesMenuOpen ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-900 text-white hover:bg-slate-800'}" aria-expanded="${App.state.modulesMenuOpen}">
+                        <i data-lucide="layout-grid" class="w-5 h-5"></i>
+                        <span>Módulos</span>
+                    </button>
                 </div>
             </nav>`;
     },
@@ -755,6 +885,7 @@ const App = {
         App.state.isAddViajeOpen = false; App.state.isAddClienteOpen = false; App.state.isAddNominaOpen = false;
         App.state.isAddSocioOpen = false; App.state.isTransferOpen = false; App.state.isAddCuentaOpen = false; App.state.isAddTransaccionOpen = false;
         App.state.isPagoCarteraOpen = false; App.state.isAddUsuarioOpen = false;
+        App.state.modulesMenuOpen = false;
         App.state.numpad.isOpen = false;
         App.state.editingViajeId = null; App.state.editingClienteId = null; App.state.editingSocioId = null; App.state.editingCuentaId = null; App.state.editingUsuarioId = null;
         
@@ -1052,6 +1183,10 @@ const App = {
             <div>
                 <h2 class="text-xl md:text-2xl font-bold text-slate-800">Dashboard Operativo y Financiero</h2>
                 <p class="text-sm text-slate-500">M/N Greicy Jireth - KPIs consolidados en Tiempo Real</p>
+            </div>
+
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 md:p-5 md:hidden">
+                ${App.renderModulosGrid({ showHeading: true })}
             </div>
 
             <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
@@ -3937,9 +4072,11 @@ const App = {
             ${App.renderModals()}
             
             <header class="app-shell-header bg-white border-b border-slate-200 px-3 py-2.5 sm:p-4 flex flex-col gap-2 sm:flex-row sm:justify-between sm:items-center z-10 shrink-0 print:hidden shadow-sm">
-                <div class="flex items-center min-w-0 w-full sm:w-auto">
-                    ${App.state.activeTab !== 'dashboard' ? `<button onclick="window.App.setTab('dashboard')" class="mr-2 sm:mr-3 bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors shrink-0"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
-                    <h1 onclick="window.App.setTab('dashboard')" class="text-base sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors truncate min-w-0"><i data-lucide="anchor" class="mr-1.5 sm:mr-2 text-blue-600 w-5 h-5 shrink-0"></i><span class="truncate">Don Sebe</span></h1>
+                <div class="flex items-center min-w-0 w-full sm:w-auto gap-2">
+                    ${App.state.activeTab !== 'dashboard' ? `<button type="button" onclick="window.App.goToModule('dashboard')" class="flex items-center gap-1.5 bg-blue-600 text-white pl-2.5 pr-3 py-2 rounded-full text-[10px] font-black shadow-sm shrink-0 md:hidden"><i data-lucide="home" class="w-4 h-4"></i> Inicio</button>
+                    <button type="button" onclick="window.App.goToModule('dashboard')" class="mr-1 hidden md:flex bg-slate-100 p-2 rounded-full text-slate-600 hover:bg-slate-200 transition-colors shrink-0"><i data-lucide="arrow-left" class="w-5 h-5"></i></button>` : ''}
+                    <h1 onclick="window.App.goToModule('dashboard')" class="text-base sm:text-xl font-black text-slate-800 flex items-center tracking-tight cursor-pointer hover:text-blue-600 transition-colors truncate min-w-0"><i data-lucide="anchor" class="mr-1.5 sm:mr-2 text-blue-600 w-5 h-5 shrink-0"></i><span class="truncate">Don Sebe</span></h1>
+                    ${App.state.activeTab !== 'dashboard' ? `<button type="button" onclick="window.App.toggleModulesMenu()" class="md:hidden ml-auto flex items-center gap-1 bg-slate-900 text-white px-2.5 py-2 rounded-full text-[10px] font-black shrink-0"><i data-lucide="layout-grid" class="w-3.5 h-3.5"></i> Menú</button>` : ''}
                 </div>
                 <div class="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto shrink-0">
                     <div title="${App.getSyncStatus().title}" class="flex bg-slate-900 text-white px-2.5 py-1 rounded-full text-[9px] sm:text-[10px] font-bold shadow-md items-center max-w-[42%] sm:max-w-none">
@@ -3960,7 +4097,7 @@ const App = {
 
             ${App.renderAppNav()}
 
-            ${App.canEdit() ? `<div class="fixed bottom-[5.75rem] right-4 sm:bottom-24 sm:right-6 z-50 print:hidden flex flex-col items-end space-y-3" style="padding-bottom: env(safe-area-inset-bottom, 0px);">
+            ${App.canEdit() ? `<div class="fixed bottom-[4.5rem] md:bottom-[7.5rem] right-4 sm:right-6 z-50 print:hidden flex flex-col items-end space-y-3" style="padding-bottom: env(safe-area-inset-bottom, 0px);">
                 ${App.state.isFabOpen ? `
                     <button onclick="window.App.state.isAddViajeOpen=true; window.App.state.editingViajeId=null; window.App.state.isFabOpen=false; window.App.render()" class="bg-blue-600 text-white p-3.5 rounded-full shadow-lg hover:bg-blue-700 flex items-center animate-fade-in transition-transform hover:scale-105 group">
                         <span class="mr-3 font-bold text-xs bg-white/90 backdrop-blur-sm text-slate-700 px-3 py-1.5 rounded-xl shadow-sm border border-slate-200/50 group-hover:text-blue-700 transition-colors">Nuevo Viaje</span>
